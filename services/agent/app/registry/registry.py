@@ -1,7 +1,8 @@
 import json, os
 from typing import Dict, Any, List
 
-TOOLS_PATH = os.getenv("TOOL_REGISTRY_PATH", "/app/registry/tools.json")
+# TOOLS_PATH = os.getenv("TOOL_REGISTRY_PATH", "/app/registry/tools.json")
+TOOLS_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../registry/tools.json'))
 
 class ToolRegistry:
     def __init__(self):
