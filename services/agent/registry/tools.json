@@ -1,0 +1,29 @@
+[
+  {
+    "name": "anomaly_zscore",
+    "version": "1.1.0",
+    "protocol": "REST",
+    "endpoint": "http://anomaly-zscore:9091/run",
+    "capabilities": [
+      "anomaly_detection",
+      "timeseries",
+      "tabular"
+    ],
+    "schema": {
+      "input": {
+        "frame_uri": "string",
+        "schema": {
+          "timestamp": "string",
+          "entity_keys": [
+            "string"
+          ],
+          "metric": "string"
+        }
+      },
+      "output": {
+        "anomalies": "array",
+        "summary": "object"
+      }
+    }
+  }
+]

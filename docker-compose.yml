@@ -1,0 +1,13 @@
+version: "3.9"
+services:
+  agent:
+    build: ./services/agent
+    ports: ["8080:8080"]
+    environment:
+      - TOOL_REGISTRY_PATH=/app/registry/tools.json
+      - ANOMALY_URL=http://anomaly-zscore:9091/run
+    depends_on:
+      - anomaly-zscore
+  anomaly-zscore:
+    build: ./services/tools/anomaly_zscore
+    ports: ["9091:9091"]
