@@ -2,28 +2,99 @@
   {
     "name": "anomaly_zscore",
     "version": "1.1.0",
-    "protocol": "REST",
-    "endpoint": "http://anomaly-zscore:9091/run",
-    "capabilities": [
-      "anomaly_detection",
-      "timeseries",
-      "tabular"
-    ],
+    "protocols": ["REST", "gRPC"],
+    "endpoints": {
+      "REST": "http://anomaly-zscore:9091/run",
+      "gRPC": "anomaly-zscore:50051"
+    },
+    "capabilities": ["anomaly_detection", "timeseries", "tabular"],
     "schema": {
-      "input": {
-        "frame_uri": "string",
-        "schema": {
-          "timestamp": "string",
-          "entity_keys": [
-            "string"
-          ],
-          "metric": "string"
-        }
-      },
-      "output": {
-        "anomalies": "array",
-        "summary": "object"
-      }
+      "input": {"frame_uri": "string", "schema": {"timestamp": "string", "entity_keys": ["string"], "metric": "string"}},
+      "output": {"anomalies": "array", "summary": "object"}
+    }
+  },
+  {
+    "name": "incident_detector",
+    "version": "1.0.0",
+    "protocols": ["REST", "gRPC"],
+    "endpoints": {
+      "REST": "http://incident-detector:9092/run",
+      "gRPC": "incident-detector:50052"
+    },
+    "capabilities": ["incident_detection", "tabular"],
+    "schema": {
+      "input": {"frame_uri": "string", "schema": {"timestamp": "string", "entity_keys": ["string"], "metric": "string"}},
+      "output": {"incidents": "array", "summary": "object"}
+    }
+  },
+  {
+    "name": "timeseries_forecaster",
+    "version": "1.0.0",
+    "protocols": ["REST", "gRPC"],
+    "endpoints": {
+      "REST": "http://timeseries-forecaster:9093/run",
+      "gRPC": "timeseries-forecaster:50053"
+    },
+    "capabilities": ["time_series_forecasting", "timeseries"],
+    "schema": {
+      "input": {"frame_uri": "string", "schema": {"timestamp": "string", "entity_keys": ["string"], "metric": "string"}},
+      "output": {"forecast": "array", "summary": "object"}
+    }
+  },
+  {
+    "name": "stats_comparator",
+    "version": "1.0.0",
+    "protocols": ["REST", "gRPC"],
+    "endpoints": {
+      "REST": "http://stats-comparator:9094/run",
+      "gRPC": "stats-comparator:50054"
+    },
+    "capabilities": ["descriptive_stats", "comparison", "tabular"],
+    "schema": {
+      "input": {"frame_uri": "string", "schema": {"timestamp": "string", "entity_keys": ["string"], "metric": "string"}},
+      "output": {"stats": "object", "comparison": "object", "summary": "object"}
+    }
+  },
+  {
+    "name": "classifier_regressor",
+    "version": "1.0.0",
+    "protocols": ["REST", "gRPC"],
+    "endpoints": {
+      "REST": "http://classifier-regressor:9095/run",
+      "gRPC": "classifier-regressor:50055"
+    },
+    "capabilities": ["classification", "regression", "tabular"],
+    "schema": {
+      "input": {"frame_uri": "string", "schema": {"timestamp": "string", "entity_keys": ["string"], "metric": "string"}},
+      "output": {"predictions": "array", "summary": "object"}
+    }
+  },
+  {
+    "name": "cluster_feature_engineer",
+    "version": "1.0.0",
+    "protocols": ["REST", "gRPC"],
+    "endpoints": {
+      "REST": "http://cluster-feature-engineer:9096/run",
+      "gRPC": "cluster-feature-engineer:50056"
+    },
+    "capabilities": ["clustering", "feature_engineering", "tabular"],
+    "schema": {
+      "input": {"frame_uri": "string", "schema": {"timestamp": "string", "entity_keys": ["string"], "metric": "string"}},
+      "output": {"clusters": "array", "features": "array", "summary": "object"}
+    }
+  },
+  {
+    "name": "geospatial_mapper",
+    "version": "1.0.0",
+    "protocols": ["REST", "gRPC"],
+    "endpoints": {
+      "REST": "http://geospatial-mapper:9097/run",
+      "gRPC": "geospatial-mapper:50057"
+    },
+    "capabilities": ["geospatial_mapping", "analysis", "geojson"],
+    "schema": {
+      "input": {"frame_uri": "string", "schema": {"timestamp": "string", "entity_keys": ["string"], "metric": "string"}},
+      "output": {"maps": "array", "analysis": "object", "summary": "object"}
     }
   }
 ]
