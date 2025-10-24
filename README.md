@@ -182,6 +182,41 @@ Design an intelligent, modular, data-agnostic agent capable of processing divers
 
 ## Next Steps
 
+---
+
+## Frontend Visualization
+
+This project includes a React-based frontend for uploading datasets, running anomaly detection, and visualizing results.
+
+### How to Run the Frontend
+
+1. Open a terminal and navigate to the `frontend` folder:
+	```
+	cd frontend
+	```
+2. Install dependencies:
+	```
+	npm install
+	```
+3. Start the development server:
+	```
+	npm start
+	```
+4. Open your browser and go to:
+	```
+	http://localhost:3000
+	```
+
+**Note:** Make sure the MCP agent backend is running at `http://localhost:8080` before using the frontend.
+
+### Features
+- Upload CSV dataset
+- Run anomaly detection
+- View detected anomalies in a table and chart
+- See summary statistics
+
+You can extend the UI for more tools, real-time updates, and advanced visualizations as needed.
+
 1. Scaffold base API + agent logic
 2. Implement router (rule-based first)
 3. Add 3–5 MCP tools with REST endpoints
@@ -189,3 +224,16 @@ Design an intelligent, modular, data-agnostic agent capable of processing divers
 5. Add UI layer for visualization (DAG, runs, logs)
 6. Package with Docker Compose for local testing
 7. Extend with gRPC + Kafka for async cases
+
+
+# Create a virtual environment named .venv
+python -m venv t_venv
+
+# Activate the virtual environment
+t_venv\Scripts\activate
+
+# (Optional) Upgrade pip
+python -m pip install --upgrade pip
+
+# (Optional) Install dependencies from requirements.txt
+pip install -r requirements.txt

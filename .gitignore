@@ -9,3 +9,5 @@
 .DS_Store
 .idea/
 .vscode/
+t_venv/
+frontend/node_modules/

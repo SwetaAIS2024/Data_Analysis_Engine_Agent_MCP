@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Body, HTTPException, Header
+from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 from .schemas.api import AnalyzeRequest, AnalyzeResponse, RunResponse
 from .router.rule_router import RuleRouter
@@ -7,7 +8,15 @@ from .registry.registry import ToolRegistry
 from .security.auth import verify_jwt_stub
 from .observability.otel import init_tracing
 
+
 app = FastAPI(title="MCP Agent", version="v1")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 tool_registry = ToolRegistry()
 router = RuleRouter(tool_registry)

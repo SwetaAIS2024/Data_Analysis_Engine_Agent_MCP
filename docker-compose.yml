@@ -1,13 +1,60 @@
-version: "3.9"
+ 
 services:
   agent:
-    build: ./services/agent
-    ports: ["8080:8080"]
+    build:
+      context: .
+      dockerfile: services/agent/Dockerfile
+    ports:
+      - "8080:8080"
     environment:
       - TOOL_REGISTRY_PATH=/app/registry/tools.json
-      - ANOMALY_URL=http://anomaly-zscore:9091/run
     depends_on:
       - anomaly-zscore
+      - incident-detector
+      - timeseries-forecaster
+      - stats-comparator
+      - classifier-regressor
+      - cluster-feature-engineer
+      - geospatial-mapper
   anomaly-zscore:
-    build: ./services/tools/anomaly_zscore
-    ports: ["9091:9091"]
+    build:
+      context: .
+      dockerfile: services/tools/anomaly_zscore/Dockerfile
+    ports:
+      - "9091:9091"
+  incident-detector:
+    build:
+      context: .
+      dockerfile: services/tools/incident_detector/Dockerfile
+    ports:
+      - "9092:9092"
+  timeseries-forecaster:
+    build:
+      context: .
+      dockerfile: services/tools/timeseries_forecaster/Dockerfile
+    ports:
+      - "9093:9093"
+  stats-comparator:
+    build:
+      context: .
+      dockerfile: services/tools/stats_comparator/Dockerfile
+    ports:
+      - "9094:9094"
+  classifier-regressor:
+    build:
+      context: .
+      dockerfile: services/tools/classifier_regressor/Dockerfile
+    ports:
+      - "9095:9095"
+  cluster-feature-engineer:
+    build:
+      context: .
+      dockerfile: services/tools/cluster_feature_engineer/Dockerfile
+    ports:
+      - "9096:9096"
+  geospatial-mapper:
+    build:
+      context: .
+      dockerfile: services/tools/geospatial_mapper/Dockerfile
+    ports:
+      - "9097:9097"

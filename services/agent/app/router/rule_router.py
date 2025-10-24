@@ -32,6 +32,9 @@ class RuleRouter:
         if tool:
             t = self.registry.get_tool(tool)
             if t:
-                endpoint, version, protocol = t["endpoint"], t["version"], t["protocol"]
+                # Select protocol (default to REST, can be extended)
+                protocol = "REST"
+                endpoint = t["endpoints"].get(protocol)
+                version = t["version"]
 
         return RouteDecision(request_id=rid, trace_id=tid, tool=tool, version=version, protocol=protocol, endpoint=endpoint)
