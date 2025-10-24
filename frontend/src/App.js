@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import Papa from "papaparse";
 import axios from "axios";
 import { Chart, registerables } from "chart.js";
+import 'chartjs-adapter-date-fns';
 Chart.register(...registerables);
 
 function App() {
@@ -60,27 +61,71 @@ function App() {
 
   // Simple chart rendering (anomalies)
   React.useEffect(() => {
-    if (result && result.result && result.result.anomalies && result.result.anomalies.length > 0) {
+    if (result && result.result && result.result.anomalies) {
       const ctx = document.getElementById("anomalyChart");
       if (ctx) {
-        const timestamps = result.result.anomalies.map((a) => a.timestamp);
-        const values = result.result.anomalies.map((a) => a.value);
-        new Chart(ctx, {
+        // Destroy previous chart instance if exists
+        if (window.anomalyChartInstance) {
+          window.anomalyChartInstance.destroy();
+        }
+        // Prepare anomaly points
+        const anomalyPoints = result.result.anomalies.map((a) => ({
+          x: new Date(a.timestamp),
+          y: a.value !== undefined ? a.value : a.score
+        }));
+        // Prepare normal points from all data minus anomalies
+        let allPoints = [];
+        if (data && data.length > 0) {
+          // Build a Set of anomaly timestamps for fast lookup
+          const anomalyTimestamps = new Set(result.result.anomalies.map(a => a.timestamp));
+          allPoints = data
+            .filter(row => !anomalyTimestamps.has(row.timestamp))
+            .map(row => ({ x: new Date(row.timestamp), y: Number(row.speed_kmh) }));
+        }
+        window.anomalyChartInstance = new Chart(ctx, {
           type: "scatter",
           data: {
-            labels: timestamps,
             datasets: [
               {
+                label: "Normal Value",
+                data: allPoints,
+                backgroundColor: "blue",
+                pointRadius: 2
+              },
+              {
                 label: "Anomaly Value",
-                data: result.result.anomalies.map((a) => ({ x: a.timestamp, y: a.value })),
+                data: anomalyPoints,
                 backgroundColor: "red",
+                pointRadius: 4
               },
             ],
           },
+          options: {
+            scales: {
+              x: {
+                type: "time",
+                time: {
+                  parser: "yyyy-MM-dd'T'HH:mm:ss",
+                  tooltipFormat: "Pp",
+                  unit: "minute"
+                },
+                title: {
+                  display: true,
+                  text: "Timestamp"
+                }
+              },
+              y: {
+                title: {
+                  display: true,
+                  text: "Value"
+                }
+              }
+            }
+          }
         });
       }
     }
-  }, [result]);
+  }, [result, data]);
 
   return (
     <div style={{ padding: 24, fontFamily: "sans-serif" }}>
@@ -90,6 +135,30 @@ function App() {
       <button onClick={handleAnalyze} disabled={!data.length || loading}>
         {loading ? "Analyzing..." : "Run Anomaly Detection"}
       </button>
+      {/* Preview top 10 rows of uploaded CSV */}
+      {data && data.length > 0 && (
+        <div style={{ marginTop: 24 }}>
+          <h3>CSV Preview (Top 10 Rows)</h3>
+          <table border="1" cellPadding="4">
+            <thead>
+              <tr>
+                {Object.keys(data[0]).map((col, idx) => (
+                  <th key={idx}>{col}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {data.slice(0, 10).map((row, i) => (
+                <tr key={i}>
+                  {Object.values(row).map((val, j) => (
+                    <td key={j}>{val}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
       {result && (
         <div style={{ marginTop: 32 }}>
           <h3>Detected Anomalies</h3>

@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request, HTTPException
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 import pandas as pd
+from sklearn.ensemble import IsolationForest
 
 app = FastAPI(title="anomaly_zscore", version="1.1.0")
 
@@ -16,14 +17,13 @@ class Input(BaseModel):
     schema: Schema
 
 class Params(BaseModel):
-    rolling_window: str = "15min"
-    zscore_threshold: float = 3.0
-    min_points: int = 30
+    contamination: float = 0.05  # Proportion of anomalies expected
 
 class Payload(BaseModel):
     input: Input
     params: Params
     context: Dict[str,Any]
+
 
 @app.post("/run")
 def run(payload: Payload, request: Request):
@@ -31,7 +31,6 @@ def run(payload: Payload, request: Request):
     if payload.input.rows:
         df = pd.DataFrame(payload.input.rows)
     else:
-        # In a real system, load from storage via payload.input.frame_uri
         raise HTTPException(400, "For skeleton, supply input.rows inline.")
 
     ts = payload.input.schema.timestamp
@@ -44,20 +43,19 @@ def run(payload: Payload, request: Request):
     results = []
     for key_vals, g in df.groupby(keys):
         g = g.copy()
-        roll = g[metric].rolling(payload.params.rolling_window, min_periods=payload.params.min_points)
-        mu = roll.mean()
-        sd = roll.std(ddof=0)
-        z = (g[metric] - mu) / sd
-        anomalies = z.abs() >= payload.params.zscore_threshold
-        for t in g[anomalies].index:
-            results.append({
-                "entity": dict(zip(keys, key_vals if isinstance(key_vals, tuple) else (key_vals,))),
-                "timestamp": t.isoformat(),
-                "value": float(g.loc[t, metric]),
-                "zscore": float(z.loc[t]) if pd.notnull(z.loc[t]) else None,
-                "rolling_mean": float(mu.loc[t]) if pd.notnull(mu.loc[t]) else None,
-                "rolling_std": float(sd.loc[t]) if pd.notnull(sd.loc[t]) else None
-            })
+        # Isolation Forest expects 2D array
+        X = g[[metric]].values
+        clf = IsolationForest(contamination=payload.params.contamination, random_state=42)
+        preds = clf.fit_predict(X)
+        for idx, pred in enumerate(preds):
+            if pred == -1:
+                t = g.index[idx]
+                results.append({
+                    "entity": dict(zip(keys, key_vals if isinstance(key_vals, tuple) else (key_vals,))),
+                    "timestamp": t.isoformat(),
+                    "value": float(g.iloc[idx][metric]),
+                    "score": float(clf.decision_function([X[idx]])[0])
+                })
 
     summary = {
         "total_entities": int(df.groupby(keys).ngroups),
