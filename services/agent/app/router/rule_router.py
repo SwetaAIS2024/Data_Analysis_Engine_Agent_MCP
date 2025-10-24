@@ -22,17 +22,35 @@ class RuleRouter:
         task = (req.context or {}).get("task","").lower()
         data_type = (req.context or {}).get("data_type","").lower()
 
-        # Minimal rules
-        if task == "anomaly_detection" and data_type in ("tabular","timeseries"):
-            tool = "anomaly_zscore"
-        else:
-            tool = None
+        # Try to infer columns/features from inline data
+        columns = set()
+        if req.data_pointer.format == "inline" and req.data_pointer.rows:
+            first_row = req.data_pointer.rows[0] if len(req.data_pointer.rows) > 0 else {}
+            columns = set(first_row.keys())
 
-        endpoint, version, protocol = None, "1.1.0", "REST"
+        tool = None
+        # Rule-based logic
+        if "latitude" in columns and "longitude" in columns:
+            tool = "geospatial_mapper"
+        elif task == "anomaly_detection" and data_type in ("tabular","timeseries"):
+            tool = "anomaly_zscore"
+        elif task == "clustering" and data_type == "tabular":
+            tool = "clustering"
+        elif task == "feature_engineering" and data_type == "tabular":
+            tool = "feature_engineering"
+        elif task == "classification" and data_type == "tabular":
+            tool = "classifier_regressor"
+        elif task == "forecasting" and data_type == "timeseries":
+            tool = "timeseries_forecaster"
+        elif task == "stats_comparison" and data_type == "tabular":
+            tool = "stats_comparator"
+        elif task == "incident_detection" and data_type == "tabular":
+            tool = "incident_detector"
+
+        endpoint, version, protocol = None, "1.0.0", "REST"
         if tool:
             t = self.registry.get_tool(tool)
             if t:
-                # Select protocol (default to REST, can be extended)
                 protocol = "REST"
                 endpoint = t["endpoints"].get(protocol)
                 version = t["version"]

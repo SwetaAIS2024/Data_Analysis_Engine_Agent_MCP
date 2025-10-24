@@ -46,12 +46,18 @@ services:
       dockerfile: services/tools/classifier_regressor/Dockerfile
     ports:
       - "9095:9095"
-  cluster-feature-engineer:
+  clustering:
     build:
       context: .
-      dockerfile: services/tools/cluster_feature_engineer/Dockerfile
+      dockerfile: services/tools/clustering/Dockerfile
     ports:
-      - "9096:9096"
+      - "9098:9098"
+  feature-engineering:
+    build:
+      context: .
+      dockerfile: services/tools/feature_engineering/Dockerfile
+    ports:
+      - "9099:9099"
   geospatial-mapper:
     build:
       context: .

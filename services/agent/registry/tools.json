@@ -70,17 +70,29 @@
     }
   },
   {
-    "name": "cluster_feature_engineer",
+    "name": "clustering",
     "version": "1.0.0",
-    "protocols": ["REST", "gRPC"],
+    "protocols": ["REST"],
     "endpoints": {
-      "REST": "http://cluster-feature-engineer:9096/run",
-      "gRPC": "cluster-feature-engineer:50056"
+      "REST": "http://clustering:9098/run"
     },
-    "capabilities": ["clustering", "feature_engineering", "tabular"],
+    "capabilities": ["clustering", "tabular"],
     "schema": {
       "input": {"frame_uri": "string", "schema": {"timestamp": "string", "entity_keys": ["string"], "metric": "string"}},
-      "output": {"clusters": "array", "features": "array", "summary": "object"}
+      "output": {"clusters": "array", "summary": "object"}
+    }
+  },
+  {
+    "name": "feature_engineering",
+    "version": "1.0.0",
+    "protocols": ["REST"],
+    "endpoints": {
+      "REST": "http://feature-engineering:9099/run"
+    },
+    "capabilities": ["feature_engineering", "tabular"],
+    "schema": {
+      "input": {"frame_uri": "string", "schema": {"timestamp": "string", "entity_keys": ["string"], "metric": "string"}},
+      "output": {"features": "array", "summary": "object"}
     }
   },
   {

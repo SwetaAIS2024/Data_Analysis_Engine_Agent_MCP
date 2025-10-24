@@ -1,3 +1,4 @@
+
 import React, { useState } from "react";
 import Papa from "papaparse";
 import axios from "axios";
@@ -10,6 +11,8 @@ function App() {
   const [data, setData] = useState([]);
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [task, setTask] = useState("anomaly_detection");
+  const [dataType, setDataType] = useState("tabular");
 
   const handleFileChange = (e) => {
     setCsvFile(e.target.files[0]);
@@ -35,7 +38,7 @@ function App() {
       const payload = {
         tenant_id: "dev-tenant",
         mode: "sync",
-        context: { task: "anomaly_detection", data_type: "tabular" },
+        context: { task, data_type: dataType },
         data_pointer: {
           uri: "sample://in-memory",
           format: "inline",
@@ -128,18 +131,31 @@ function App() {
   }, [result, data]);
 
   return (
-    <div style={{ padding: 24, fontFamily: "sans-serif" }}>
-      <h2>MCP Agent Anomaly Detection Demo</h2>
+    <div style={{ padding: "2rem" }}>
+      <h2>Data Analysis Engine Agent</h2>
+      <div style={{ marginBottom: "1rem" }}>
+        <label>Task:&nbsp;</label>
+        <select value={task} onChange={e => setTask(e.target.value)}>
+          <option value="anomaly_detection">Anomaly Detection</option>
+          <option value="clustering">Clustering</option>
+          <option value="feature_engineering">Feature Engineering</option>
+        </select>
+        &nbsp;&nbsp;
+        <label>Dataset Type:&nbsp;</label>
+        <select value={dataType} onChange={e => setDataType(e.target.value)}>
+          <option value="tabular">Tabular</option>
+          <option value="timeseries">Timeseries</option>
+          <option value="geospatial">Geospatial</option>
+        </select>
+      </div>
       <input type="file" accept=".csv" onChange={handleFileChange} />
-      <button onClick={handleUpload}>Load CSV</button>
-      <button onClick={handleAnalyze} disabled={!data.length || loading}>
-        {loading ? "Analyzing..." : "Run Anomaly Detection"}
-      </button>
-      {/* Preview top 10 rows of uploaded CSV */}
-      {data && data.length > 0 && (
-        <div style={{ marginTop: 24 }}>
-          <h3>CSV Preview (Top 10 Rows)</h3>
-          <table border="1" cellPadding="4">
+      <button onClick={handleUpload} style={{ marginLeft: "1rem" }}>Preview CSV</button>
+      <button onClick={handleAnalyze} style={{ marginLeft: "1rem" }} disabled={loading || !data.length}>Run Analysis</button>
+      {loading && <div>Loading...</div>}
+      {data.length > 0 && (
+        <div style={{ marginTop: "2rem" }}>
+          <h3>CSV Preview</h3>
+          <table border="1" cellPadding="4" style={{ borderCollapse: "collapse" }}>
             <thead>
               <tr>
                 {Object.keys(data[0]).map((col, idx) => (
@@ -148,10 +164,10 @@ function App() {
               </tr>
             </thead>
             <tbody>
-              {data.slice(0, 10).map((row, i) => (
-                <tr key={i}>
-                  {Object.values(row).map((val, j) => (
-                    <td key={j}>{val}</td>
+              {data.slice(0, 10).map((row, idx) => (
+                <tr key={idx}>
+                  {Object.values(row).map((val, i) => (
+                    <td key={i}>{val}</td>
                   ))}
                 </tr>
               ))}
@@ -159,32 +175,16 @@ function App() {
           </table>
         </div>
       )}
-      {result && (
-        <div style={{ marginTop: 32 }}>
-          <h3>Detected Anomalies</h3>
-          <canvas id="anomalyChart" width={600} height={200}></canvas>
-          <table border="1" cellPadding="4" style={{ marginTop: 16 }}>
-            <thead>
-              <tr>
-                <th>Entity</th>
-                <th>Timestamp</th>
-                <th>Value</th>
-                <th>Z-Score</th>
-              </tr>
-            </thead>
-            <tbody>
-              {result.result.anomalies.map((a, i) => (
-                <tr key={i}>
-                  <td>{JSON.stringify(a.entity)}</td>
-                  <td>{a.timestamp}</td>
-                  <td>{a.value}</td>
-                  <td>{a.zscore}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <h4>Summary</h4>
-          <pre>{JSON.stringify(result.result.summary, null, 2)}</pre>
+      {result && result.result && (
+        <div style={{ marginTop: "2rem" }}>
+          <h3>Analysis Result</h3>
+          <canvas id="anomalyChart" width="800" height="300" style={{ marginBottom: "2rem" }}></canvas>
+          {result.result.summary && (
+            <>
+              <h4>Summary</h4>
+              <pre>{JSON.stringify(result.result.summary, null, 2)}</pre>
+            </>
+          )}
         </div>
       )}
     </div>
