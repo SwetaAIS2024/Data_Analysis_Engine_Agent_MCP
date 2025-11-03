@@ -35,10 +35,16 @@ function App() {
     try {
       // Debug: print loaded data
       console.log("Loaded CSV data:", data);
+      
+      // Build task description for V2 context extraction
+      const taskDescription = `${task.replace('_', ' ')} on ${dataType} data`;
+      
       const payload = {
         tenant_id: "dev-tenant",
-        mode: "sync",
-        context: { task, data_type: dataType },
+        context: { 
+          task: taskDescription,
+          data_type: dataType 
+        },
         data_pointer: {
           uri: "sample://in-memory",
           format: "inline",
@@ -48,23 +54,51 @@ function App() {
           metric: "speed_kmh",
           key_fields: ["segment_id", "sensor_id"],
           timestamp_field: "timestamp",
-          zscore_threshold: 2.0,
+          threshold: 2.0,
           rolling_window: "2min",
           min_points: 2,
         },
       };
-      const res = await axios.post("http://localhost:8080/v1/analyze", payload);
+      
+      console.log("Sending V2 request:", payload);
+      const res = await axios.post("http://localhost:8080/v2/analyze", payload);
+      console.log("V2 response:", res.data);
+      
+      // Handle V2 response format
+      if (res.data.result && res.data.result.user_feedback) {
+        // User feedback required
+        alert("User feedback required: " + JSON.stringify(res.data.result.user_feedback, null, 2));
+      }
+      
       setResult(res.data);
       setLoading(false);
     } catch (err) {
       setLoading(false);
-      alert("Error: " + err.message);
+      console.error("Analysis error:", err);
+      alert("Error: " + (err.response?.data?.detail || err.message));
     }
   };
 
   // Simple chart rendering (anomalies)
   React.useEffect(() => {
-    if (result && result.result && result.result.anomalies) {
+    if (!result) return;
+    
+    // Handle V2 response format
+    let anomalies = [];
+    if (result.result && result.result.results) {
+      // V2 format: result.results is array of tool results
+      result.result.results.forEach(toolResult => {
+        if (toolResult.status === "success" && toolResult.output) {
+          if (toolResult.output.anomalies) {
+            anomalies = anomalies.concat(toolResult.output.anomalies);
+          } else if (toolResult.output.output && toolResult.output.output.anomalies) {
+            anomalies = anomalies.concat(toolResult.output.output.anomalies);
+          }
+        }
+      });
+    }
+    
+    if (anomalies.length > 0) {
       const ctx = document.getElementById("anomalyChart");
       if (ctx) {
         // Destroy previous chart instance if exists
@@ -72,7 +106,7 @@ function App() {
           window.anomalyChartInstance.destroy();
         }
         // Prepare anomaly points
-        const anomalyPoints = result.result.anomalies.map((a) => ({
+        const anomalyPoints = anomalies.map((a) => ({
           x: new Date(a.timestamp),
           y: a.value !== undefined ? a.value : a.score
         }));
@@ -80,7 +114,7 @@ function App() {
         let allPoints = [];
         if (data && data.length > 0) {
           // Build a Set of anomaly timestamps for fast lookup
-          const anomalyTimestamps = new Set(result.result.anomalies.map(a => a.timestamp));
+          const anomalyTimestamps = new Set(anomalies.map(a => a.timestamp));
           allPoints = data
             .filter(row => !anomalyTimestamps.has(row.timestamp))
             .map(row => ({ x: new Date(row.timestamp), y: Number(row.speed_kmh) }));
@@ -132,13 +166,19 @@ function App() {
 
   return (
     <div style={{ padding: "2rem" }}>
-      <h2>Data Analysis Engine Agent</h2>
+      <h2>Data Analysis Engine Agent - V2</h2>
+      <p style={{ color: "#666", marginBottom: "1.5rem" }}>
+        Simplified pipeline with context extraction, chaining manager, and tool invocation
+      </p>
       <div style={{ marginBottom: "1rem" }}>
         <label>Task:&nbsp;</label>
         <select value={task} onChange={e => setTask(e.target.value)}>
           <option value="anomaly_detection">Anomaly Detection</option>
           <option value="clustering">Clustering</option>
           <option value="feature_engineering">Feature Engineering</option>
+          <option value="classification">Classification</option>
+          <option value="forecasting">Forecasting</option>
+          <option value="stats_comparison">Stats Comparison</option>
         </select>
         &nbsp;&nbsp;
         <label>Dataset Type:&nbsp;</label>
@@ -146,6 +186,7 @@ function App() {
           <option value="tabular">Tabular</option>
           <option value="timeseries">Timeseries</option>
           <option value="geospatial">Geospatial</option>
+          <option value="categorical">Categorical</option>
         </select>
       </div>
       <input type="file" accept=".csv" onChange={handleFileChange} />
@@ -175,15 +216,90 @@ function App() {
           </table>
         </div>
       )}
-      {result && result.result && (
+      {result && (
         <div style={{ marginTop: "2rem" }}>
           <h3>Analysis Result</h3>
+          
+          {/* V2 Pipeline Metadata */}
+          {result.tool_meta && (
+            <div style={{ marginBottom: "1rem", padding: "1rem", backgroundColor: "#f0f0f0", borderRadius: "4px" }}>
+              <h4>Pipeline Info</h4>
+              <p><strong>Status:</strong> {result.result?.status || result.status}</p>
+              <p><strong>Version:</strong> {result.tool_meta.pipeline_version}</p>
+              <p><strong>Duration:</strong> {result.tool_meta.duration_seconds?.toFixed(2)}s</p>
+              {result.tool_meta.context_extraction && (
+                <>
+                  <p><strong>Goal:</strong> {result.tool_meta.context_extraction.goal}</p>
+                  <p><strong>Data Type:</strong> {result.tool_meta.context_extraction.data_type}</p>
+                </>
+              )}
+              {result.tool_meta.execution_plan && (
+                <>
+                  <p><strong>Strategy:</strong> {result.tool_meta.execution_plan.strategy}</p>
+                  <p><strong>Tools Used:</strong> {result.tool_meta.execution_plan.tools?.join(', ')}</p>
+                </>
+              )}
+            </div>
+          )}
+          
+          {/* Chart */}
           <canvas id="anomalyChart" width="800" height="300" style={{ marginBottom: "2rem" }}></canvas>
-          {result.result.summary && (
+          
+          {/* Tool Results */}
+          {result.result?.results && result.result.results.length > 0 && (
+            <div style={{ marginBottom: "1rem" }}>
+              <h4>Tool Results</h4>
+              {result.result.results.map((toolResult, idx) => (
+                <div key={idx} style={{ 
+                  marginBottom: "1rem", 
+                  padding: "1rem", 
+                  backgroundColor: toolResult.status === "success" ? "#e8f5e9" : "#ffebee",
+                  borderRadius: "4px"
+                }}>
+                  <p><strong>Tool:</strong> {toolResult.tool_id}</p>
+                  <p><strong>Status:</strong> {toolResult.status}</p>
+                  {toolResult.error && <p style={{ color: "red" }}><strong>Error:</strong> {toolResult.error}</p>}
+                  {toolResult.output && (
+                    <details>
+                      <summary>Output</summary>
+                      <pre style={{ fontSize: "0.85em" }}>{JSON.stringify(toolResult.output, null, 2)}</pre>
+                    </details>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          
+          {/* Summary */}
+          {result.result?.summary && (
             <>
               <h4>Summary</h4>
               <pre>{JSON.stringify(result.result.summary, null, 2)}</pre>
             </>
+          )}
+          
+          {/* User Feedback Required */}
+          {result.result?.user_feedback && (
+            <div style={{ 
+              marginTop: "1rem", 
+              padding: "1rem", 
+              backgroundColor: "#fff3e0", 
+              borderRadius: "4px",
+              border: "2px solid #ff9800"
+            }}>
+              <h4>⚠️ User Feedback Required</h4>
+              <p>{result.result.user_feedback.message}</p>
+              {result.result.user_feedback.options && (
+                <div>
+                  <strong>Options:</strong>
+                  <ul>
+                    {result.result.user_feedback.options.map((opt, idx) => (
+                      <li key={idx}>{opt.message || opt.option}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
           )}
         </div>
       )}
