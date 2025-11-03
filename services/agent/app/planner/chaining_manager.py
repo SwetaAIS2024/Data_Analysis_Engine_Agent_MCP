@@ -199,13 +199,11 @@ class MCPToolsChainingManager:
                 seen.add(tool)
                 unique_tools.append(tool)
         
-        # Check for multi-step requirements
-        if data_type == "timeseries" and goal != "feature_engineering":
-            # May benefit from feature engineering first
-            if "feature_engineering" in self.goal_to_tools.get("feature_engineering", []):
-                fe_tool = self.tool_registry.get("feature_engineering")
-                if fe_tool and "feature_engineering" not in unique_tools:
-                    unique_tools.insert(0, "feature_engineering")
+        # Only add feature_engineering if explicitly mentioned in the goal
+        if "feature" in goal_lower or "engineer" in goal_lower:
+            fe_tool = self.tool_registry.get_tool("feature_engineering")
+            if fe_tool and "feature_engineering" not in unique_tools:
+                unique_tools.insert(0, "feature_engineering")
         
         logger.info(f"Selected {len(unique_tools)} tools for goal '{goal}': {unique_tools}")
         return unique_tools
@@ -242,7 +240,7 @@ class MCPToolsChainingManager:
         
         # Conflict 1: Tool unavailable
         for tool in tools:
-            if not self.tool_registry.get(tool):
+            if not self.tool_registry.get_tool(tool):
                 conflicts.append({
                     "type": "tool_unavailable",
                     "tool": tool,
@@ -293,13 +291,17 @@ class MCPToolsChainingManager:
         tool_chain = []
         
         for i, tool_name in enumerate(tools):
-            tool_info = self.tool_registry.get(tool_name)
+            tool_info = self.tool_registry.get_tool(tool_name)
             if not tool_info:
                 continue
             
+            # Extract REST endpoint from endpoints object
+            endpoints = tool_info.get("endpoints", {})
+            rest_endpoint = endpoints.get("REST") if isinstance(endpoints, dict) else None
+            
             tool_spec = {
                 "tool_id": tool_name,
-                "tool_endpoint": tool_info.get("endpoint"),
+                "tool_endpoint": rest_endpoint,
                 "order": i + 1,
                 "params": self._build_tool_params(tool_name, parameters),
                 "depends_on": [i] if i > 0 and strategy == "sequential" else [],

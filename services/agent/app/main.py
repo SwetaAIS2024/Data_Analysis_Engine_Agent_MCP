@@ -111,11 +111,16 @@ def analyze_v2(req: AnalyzeRequest):
         # STEP 3: TOOLS INVOCATION
         logger.info(f"[REQUEST {request_id}] STEP 3: Tools Invocation - START")
         
-        # Build request data for tools
+        # Build request data for tools - must match tool schema expectations
         request_data = {
             "input": {
+                "frame_uri": req.data_pointer.uri or "inline://memory",
                 "rows": req.data_pointer.rows or [],
-                "columns": list(req.data_pointer.rows[0].keys()) if req.data_pointer.rows else []
+                "schema": {
+                    "timestamp": req.params.get("timestamp_field", "timestamp"),
+                    "entity_keys": req.params.get("key_fields", []),
+                    "metric": req.params.get("metric", "value")
+                }
             },
             "params": {
                 **req.params,

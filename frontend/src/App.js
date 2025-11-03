@@ -79,90 +79,296 @@ function App() {
     }
   };
 
-  // Simple chart rendering (anomalies)
+  // Visualization function for Anomaly Detection
+  const renderAnomalyChart = React.useCallback((toolResult) => {
+    const anomalies = toolResult.output.anomalies || [];
+    if (anomalies.length === 0) return;
+    
+    const ctx = document.getElementById("anomalyChart");
+    if (!ctx) return;
+    
+    // Prepare anomaly points
+    const anomalyPoints = anomalies.map((a) => ({
+      x: new Date(a.timestamp),
+      y: a.value !== undefined ? a.value : a.score
+    }));
+    
+    // Prepare normal points from all data minus anomalies
+    let allPoints = [];
+    if (data && data.length > 0) {
+      const anomalyTimestamps = new Set(anomalies.map(a => a.timestamp));
+      allPoints = data
+        .filter(row => !anomalyTimestamps.has(row.timestamp))
+        .map(row => ({ x: new Date(row.timestamp), y: Number(row.speed_kmh) }));
+    }
+    
+    window.anomalyChartInstance = new Chart(ctx, {
+      type: "scatter",
+      data: {
+        datasets: [
+          {
+            label: "Normal Value",
+            data: allPoints,
+            backgroundColor: "blue",
+            pointRadius: 2
+          },
+          {
+            label: "Anomaly Value",
+            data: anomalyPoints,
+            backgroundColor: "red",
+            pointRadius: 4
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          title: {
+            display: true,
+            text: "Anomaly Detection Results"
+          }
+        },
+        scales: {
+          x: {
+            type: "time",
+            time: {
+              parser: "yyyy-MM-dd'T'HH:mm:ss",
+              tooltipFormat: "Pp",
+              unit: "minute"
+            },
+            title: {
+              display: true,
+              text: "Timestamp"
+            }
+          },
+          y: {
+            title: {
+              display: true,
+              text: "Value"
+            }
+          }
+        }
+      }
+    });
+  }, [data]);
+
+  // Visualization function for Clustering
+  const renderClusterChart = React.useCallback((toolResult) => {
+    const clusteredData = toolResult.output.clustered_data;
+    const clusters = toolResult.output.clusters;
+    const summary = toolResult.output.summary;
+    
+    if (!clusteredData || clusteredData.length === 0) return;
+    
+    const ctx = document.getElementById("clusterChart");
+    if (!ctx) return;
+    
+    const features = summary.features_used || [];
+    if (features.length < 2) return;
+    
+    const feature1 = features[0];
+    const feature2 = features[1];
+    
+    // Define colors for clusters
+    const colors = [
+      '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF',
+      '#FF9F40', '#FF6384', '#C9CBCF', '#4BC0C0', '#FF6384'
+    ];
+    
+    // Group data by cluster
+    const datasets = {};
+    clusteredData.forEach(point => {
+      const clusterId = point.cluster;
+      const clusterName = clusterId === -1 ? 'Noise' : `Cluster ${clusterId}`;
+      
+      if (!datasets[clusterId]) {
+        datasets[clusterId] = {
+          label: clusterName,
+          data: [],
+          backgroundColor: colors[clusterId % colors.length] || '#999',
+          pointRadius: clusterId === -1 ? 3 : 5,
+          pointStyle: clusterId === -1 ? 'cross' : 'circle'
+        };
+      }
+      
+      datasets[clusterId].data.push({
+        x: point[feature1],
+        y: point[feature2]
+      });
+    });
+    
+    window.clusterChartInstance = new Chart(ctx, {
+      type: "scatter",
+      data: {
+        datasets: Object.values(datasets)
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          title: {
+            display: true,
+            text: `Clustering Results: ${feature1} vs ${feature2}`
+          },
+          legend: {
+            display: true,
+            position: 'top'
+          }
+        },
+        scales: {
+          x: {
+            title: {
+              display: true,
+              text: feature1
+            }
+          },
+          y: {
+            title: {
+              display: true,
+              text: feature2
+            }
+          }
+        }
+      }
+    });
+  }, []);
+
+  // Visualization function for Forecasting
+  const renderForecastChart = React.useCallback((toolResult) => {
+    const forecast = toolResult.output.forecast?.[0]; // First entity
+    if (!forecast || !forecast.forecast_points || !data || data.length === 0) return;
+    
+    const ctx = document.getElementById("forecastChart");
+    if (!ctx) return;
+    
+    // Historical data
+    const historicalData = data.map(row => ({
+      x: new Date(row.timestamp),
+      y: Number(row.speed_kmh)
+    }));
+    
+    // Forecast data
+    const forecastData = forecast.forecast_points.map(point => ({
+      x: new Date(point.timestamp),
+      y: point.forecast_value
+    }));
+    
+    // Confidence bounds
+    const upperBound = forecast.forecast_points.map(point => ({
+      x: new Date(point.timestamp),
+      y: point.upper_bound
+    }));
+    
+    const lowerBound = forecast.forecast_points.map(point => ({
+      x: new Date(point.timestamp),
+      y: point.lower_bound
+    }));
+    
+    window.forecastChartInstance = new Chart(ctx, {
+      type: "line",
+      data: {
+        datasets: [
+          {
+            label: "Historical",
+            data: historicalData,
+            borderColor: "#2196f3",
+            backgroundColor: "rgba(33, 150, 243, 0.1)",
+            borderWidth: 2,
+            pointRadius: 1
+          },
+          {
+            label: "Forecast",
+            data: forecastData,
+            borderColor: "#ff9800",
+            backgroundColor: "rgba(255, 152, 0, 0.1)",
+            borderWidth: 2,
+            borderDash: [5, 5],
+            pointRadius: 3
+          },
+          {
+            label: "Upper Bound",
+            data: upperBound,
+            borderColor: "rgba(255, 152, 0, 0.3)",
+            backgroundColor: "transparent",
+            borderWidth: 1,
+            borderDash: [2, 2],
+            pointRadius: 0
+          },
+          {
+            label: "Lower Bound",
+            data: lowerBound,
+            borderColor: "rgba(255, 152, 0, 0.3)",
+            backgroundColor: "transparent",
+            borderWidth: 1,
+            borderDash: [2, 2],
+            pointRadius: 0
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          title: {
+            display: true,
+            text: "Time Series Forecast"
+          }
+        },
+        scales: {
+          x: {
+            type: "time",
+            time: {
+              parser: "yyyy-MM-dd'T'HH:mm:ss",
+              tooltipFormat: "Pp"
+            },
+            title: {
+              display: true,
+              text: "Time"
+            }
+          },
+          y: {
+            title: {
+              display: true,
+              text: "Value"
+            }
+          }
+        }
+      }
+    });
+  }, [data]);
+
+  // Render visualizations based on tool type
   React.useEffect(() => {
     if (!result) return;
     
-    // Handle V2 response format
-    let anomalies = [];
+    // Clear all previous charts first
+    if (window.anomalyChartInstance) {
+      window.anomalyChartInstance.destroy();
+      window.anomalyChartInstance = null;
+    }
+    if (window.clusterChartInstance) {
+      window.clusterChartInstance.destroy();
+      window.clusterChartInstance = null;
+    }
+    if (window.forecastChartInstance) {
+      window.forecastChartInstance.destroy();
+      window.forecastChartInstance = null;
+    }
+    
+    // Check which tools were used and render appropriate visualizations
     if (result.result && result.result.results) {
-      // V2 format: result.results is array of tool results
       result.result.results.forEach(toolResult => {
         if (toolResult.status === "success" && toolResult.output) {
+          // Route to appropriate visualization function
           if (toolResult.output.anomalies) {
-            anomalies = anomalies.concat(toolResult.output.anomalies);
-          } else if (toolResult.output.output && toolResult.output.output.anomalies) {
-            anomalies = anomalies.concat(toolResult.output.output.anomalies);
+            renderAnomalyChart(toolResult);
+          } else if (toolResult.output.clusters) {
+            renderClusterChart(toolResult);
+          } else if (toolResult.output.forecast) {
+            renderForecastChart(toolResult);
           }
         }
       });
     }
-    
-    if (anomalies.length > 0) {
-      const ctx = document.getElementById("anomalyChart");
-      if (ctx) {
-        // Destroy previous chart instance if exists
-        if (window.anomalyChartInstance) {
-          window.anomalyChartInstance.destroy();
-        }
-        // Prepare anomaly points
-        const anomalyPoints = anomalies.map((a) => ({
-          x: new Date(a.timestamp),
-          y: a.value !== undefined ? a.value : a.score
-        }));
-        // Prepare normal points from all data minus anomalies
-        let allPoints = [];
-        if (data && data.length > 0) {
-          // Build a Set of anomaly timestamps for fast lookup
-          const anomalyTimestamps = new Set(anomalies.map(a => a.timestamp));
-          allPoints = data
-            .filter(row => !anomalyTimestamps.has(row.timestamp))
-            .map(row => ({ x: new Date(row.timestamp), y: Number(row.speed_kmh) }));
-        }
-        window.anomalyChartInstance = new Chart(ctx, {
-          type: "scatter",
-          data: {
-            datasets: [
-              {
-                label: "Normal Value",
-                data: allPoints,
-                backgroundColor: "blue",
-                pointRadius: 2
-              },
-              {
-                label: "Anomaly Value",
-                data: anomalyPoints,
-                backgroundColor: "red",
-                pointRadius: 4
-              },
-            ],
-          },
-          options: {
-            scales: {
-              x: {
-                type: "time",
-                time: {
-                  parser: "yyyy-MM-dd'T'HH:mm:ss",
-                  tooltipFormat: "Pp",
-                  unit: "minute"
-                },
-                title: {
-                  display: true,
-                  text: "Timestamp"
-                }
-              },
-              y: {
-                title: {
-                  display: true,
-                  text: "Value"
-                }
-              }
-            }
-          }
-        });
-      }
-    }
-  }, [result, data]);
+  }, [result, data, renderAnomalyChart, renderClusterChart, renderForecastChart]);
 
   return (
     <div style={{ padding: "2rem" }}>
@@ -224,7 +430,10 @@ function App() {
           {result.tool_meta && (
             <div style={{ marginBottom: "1rem", padding: "1rem", backgroundColor: "#f0f0f0", borderRadius: "4px" }}>
               <h4>Pipeline Info</h4>
-              <p><strong>Status:</strong> {result.result?.status || result.status}</p>
+              <p><strong>Status:</strong> <span style={{ 
+                color: result.result?.status === 'success' ? 'green' : result.result?.status === 'failed' ? 'red' : 'orange',
+                fontWeight: 'bold'
+              }}>{result.result?.status || result.status}</span></p>
               <p><strong>Version:</strong> {result.tool_meta.pipeline_version}</p>
               <p><strong>Duration:</strong> {result.tool_meta.duration_seconds?.toFixed(2)}s</p>
               {result.tool_meta.context_extraction && (
@@ -237,37 +446,181 @@ function App() {
                 <>
                   <p><strong>Strategy:</strong> {result.tool_meta.execution_plan.strategy}</p>
                   <p><strong>Tools Used:</strong> {result.tool_meta.execution_plan.tools?.join(', ')}</p>
+                  {result.tool_meta.execution_plan.reasoning && (
+                    <p><strong>Reasoning:</strong> {result.tool_meta.execution_plan.reasoning}</p>
+                  )}
                 </>
               )}
+            </div>
+          )}
+          
+          {/* Tool Invocation Logs */}
+          {result.result?.results && result.result.results.length > 0 && (
+            <div style={{ marginBottom: "1rem", padding: "1rem", backgroundColor: "#e3f2fd", borderRadius: "4px" }}>
+              <h4>🔧 Tool Invocation Log</h4>
+              <div style={{ fontFamily: "monospace", fontSize: "0.9em" }}>
+                {result.result.results.map((toolResult, idx) => (
+                  <div key={idx} style={{ 
+                    marginBottom: "0.5rem", 
+                    padding: "0.75rem", 
+                    backgroundColor: "white",
+                    borderLeft: `4px solid ${toolResult.status === "success" ? "#4caf50" : toolResult.status === "error" ? "#f44336" : "#ff9800"}`,
+                    borderRadius: "2px"
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", marginBottom: "0.25rem" }}>
+                      <span style={{ 
+                        fontSize: "1.2em", 
+                        marginRight: "0.5rem"
+                      }}>
+                        {toolResult.status === "success" ? "✅" : toolResult.status === "error" ? "❌" : "⚠️"}
+                      </span>
+                      <strong style={{ flex: 1 }}>{toolResult.tool_id}</strong>
+                      <span style={{ 
+                        padding: "2px 8px", 
+                        borderRadius: "3px",
+                        fontSize: "0.85em",
+                        backgroundColor: toolResult.status === "success" ? "#e8f5e9" : toolResult.status === "error" ? "#ffebee" : "#fff3e0",
+                        color: toolResult.status === "success" ? "#2e7d32" : toolResult.status === "error" ? "#c62828" : "#e65100"
+                      }}>
+                        {toolResult.status}
+                      </span>
+                    </div>
+                    {toolResult.error && (
+                      <div style={{ color: "#d32f2f", marginTop: "0.25rem", fontSize: "0.9em" }}>
+                        <strong>Error:</strong> {toolResult.error}
+                      </div>
+                    )}
+                    {toolResult.output && toolResult.status === "success" && (
+                      <div style={{ marginTop: "0.5rem", color: "#555" }}>
+                        {/* Anomaly Detection */}
+                        {toolResult.output.anomalies && (
+                          <div>📊 <strong>{toolResult.output.anomalies.length}</strong> anomalies detected</div>
+                        )}
+                        
+                        {/* Clustering */}
+                        {toolResult.output.clusters && (
+                          <div>🔵 <strong>{toolResult.output.clusters.length}</strong> clusters found</div>
+                        )}
+                        
+                        {/* Classification/Regression */}
+                        {toolResult.output.predictions && (
+                          <div>🎯 <strong>{toolResult.output.predictions.length}</strong> predictions made</div>
+                        )}
+                        
+                        {/* Forecasting */}
+                        {toolResult.output.forecast && (
+                          <div>📈 <strong>{toolResult.output.forecast.length}</strong> entities forecasted</div>
+                        )}
+                        
+                        {/* Incidents */}
+                        {toolResult.output.incidents && (
+                          <div>⚠️ <strong>{toolResult.output.incidents.length}</strong> incidents detected</div>
+                        )}
+                        
+                        {/* Feature Engineering */}
+                        {toolResult.output.new_features && (
+                          <div>🔧 <strong>{toolResult.output.new_features.length}</strong> new features created</div>
+                        )}
+                        
+                        {/* Stats/Maps */}
+                        {toolResult.output.maps && (
+                          <div>🗺️ <strong>{toolResult.output.maps.length}</strong> map points</div>
+                        )}
+                        
+                        {/* Summary */}
+                        {toolResult.output.summary && (
+                          <div style={{ fontSize: "0.85em", marginTop: "0.25rem" }}>
+                            {Object.entries(toolResult.output.summary).map(([key, value]) => (
+                              <span key={key} style={{ marginRight: "1rem" }}>
+                                {key}: <strong>{typeof value === 'object' ? JSON.stringify(value) : value}</strong>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
           
           {/* Chart */}
           <canvas id="anomalyChart" width="800" height="300" style={{ marginBottom: "2rem" }}></canvas>
           
-          {/* Tool Results */}
-          {result.result?.results && result.result.results.length > 0 && (
-            <div style={{ marginBottom: "1rem" }}>
-              <h4>Tool Results</h4>
-              {result.result.results.map((toolResult, idx) => (
-                <div key={idx} style={{ 
-                  marginBottom: "1rem", 
-                  padding: "1rem", 
-                  backgroundColor: toolResult.status === "success" ? "#e8f5e9" : "#ffebee",
-                  borderRadius: "4px"
-                }}>
-                  <p><strong>Tool:</strong> {toolResult.tool_id}</p>
-                  <p><strong>Status:</strong> {toolResult.status}</p>
-                  {toolResult.error && <p style={{ color: "red" }}><strong>Error:</strong> {toolResult.error}</p>}
-                  {toolResult.output && (
-                    <details>
-                      <summary>Output</summary>
-                      <pre style={{ fontSize: "0.85em" }}>{JSON.stringify(toolResult.output, null, 2)}</pre>
-                    </details>
-                  )}
+          {/* Cluster Chart */}
+          {result.result?.results && result.result.results.some(r => r.output?.clusters) && (
+            <canvas id="clusterChart" width="800" height="400" style={{ marginBottom: "2rem" }}></canvas>
+          )}
+          
+          {/* Forecast Chart */}
+          {result.result?.results && result.result.results.some(r => r.output?.forecast) && (
+            <canvas id="forecastChart" width="800" height="400" style={{ marginBottom: "2rem" }}></canvas>
+          )}
+          
+          {/* Clustering Visualization */}
+          {result.result?.results && result.result.results.some(r => r.output?.clusters) && (
+            <div style={{ marginBottom: "2rem" }}>
+              <h4>🔵 Clustering Results</h4>
+              {result.result.results.filter(r => r.output?.clusters).map((toolResult, idx) => (
+                <div key={idx}>
+                  {toolResult.output.clusters.map((cluster, cidx) => (
+                    <div key={cidx} style={{
+                      padding: "0.75rem",
+                      marginBottom: "0.5rem",
+                      backgroundColor: "#f5f5f5",
+                      borderLeft: "4px solid #2196f3",
+                      borderRadius: "4px"
+                    }}>
+                      <strong>{cluster.cluster_name}</strong> - {cluster.size} points ({cluster.percentage.toFixed(1)}%)
+                      {cluster.center && (
+                        <div style={{ fontSize: "0.85em", marginTop: "0.25rem", color: "#666" }}>
+                          Center: {Object.entries(cluster.center).map(([k, v]) => `${k}: ${v.toFixed(2)}`).join(', ')}
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
               ))}
             </div>
+          )}
+          
+          {/* Detailed Tool Results (Collapsible) */}
+          {result.result?.results && result.result.results.length > 0 && (
+            <details style={{ marginBottom: "1rem" }}>
+              <summary style={{ 
+                cursor: "pointer", 
+                padding: "0.5rem", 
+                backgroundColor: "#f5f5f5", 
+                borderRadius: "4px",
+                fontWeight: "bold"
+              }}>
+                📋 Detailed Tool Outputs ({result.result.results.length} tools)
+              </summary>
+              <div style={{ marginTop: "0.5rem" }}>
+                {result.result.results.map((toolResult, idx) => (
+                  <div key={idx} style={{ 
+                    marginBottom: "1rem", 
+                    padding: "1rem", 
+                    backgroundColor: "#fafafa",
+                    border: "1px solid #ddd",
+                    borderRadius: "4px"
+                  }}>
+                    <h5>{toolResult.tool_id}</h5>
+                    {toolResult.output && (
+                      <pre style={{ 
+                        fontSize: "0.85em", 
+                        backgroundColor: "white", 
+                        padding: "0.75rem",
+                        borderRadius: "3px",
+                        overflow: "auto",
+                        maxHeight: "400px"
+                      }}>{JSON.stringify(toolResult.output, null, 2)}</pre>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </details>
           )}
           
           {/* Summary */}
