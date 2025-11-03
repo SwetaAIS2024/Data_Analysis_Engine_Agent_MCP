@@ -88,7 +88,11 @@ class MCPToolsChainingManager:
             "regression": ["classifier_regressor"],
             "stats_comparison": ["stats_comparator"],
             "geospatial_analysis": ["geospatial_mapper"],
-            "incident_detection": ["incident_detector"]
+            "incident_detection": ["incident_detector"],
+            # Reporting and visualization (these don't exist yet)
+            "report_generation": ["anomaly_report_generator"],
+            "visualization": ["visualization_generator"],
+            "summary_report": ["report_summarizer"]
         }
     
     def create_execution_plan(
@@ -160,29 +164,51 @@ class MCPToolsChainingManager:
     ) -> List[str]:
         """Select appropriate tools based on goal and constraints"""
         
-        # Get candidate tools for goal
+        selected_tools = []
+        
+        # Check for composite goals (e.g., "detect anomalies and generate report")
+        # Look for keywords that indicate multiple goals
+        goal_lower = goal.lower()
+        
+        # Primary goal tools
         candidate_tools = self.goal_to_tools.get(goal, [])
         
         if not candidate_tools:
             logger.warning(f"No tools found for goal: {goal}")
-            return []
+        else:
+            selected_tools.extend(candidate_tools)
         
-        # Filter by availability in registry
-        available_tools = []
-        for tool_name in candidate_tools:
-            tool_info = self.tool_registry.get(tool_name)
-            if tool_info:
-                available_tools.append(tool_name)
+        # Secondary goal detection (report, visualization, summary)
+        if any(keyword in goal_lower for keyword in ["report", "reporting", "document"]):
+            if "report_generation" in self.goal_to_tools:
+                selected_tools.extend(self.goal_to_tools["report_generation"])
+        
+        if any(keyword in goal_lower for keyword in ["visualiz", "chart", "graph", "plot"]):
+            if "visualization" in self.goal_to_tools:
+                selected_tools.extend(self.goal_to_tools["visualization"])
+        
+        if any(keyword in goal_lower for keyword in ["summary", "summarize"]):
+            if "summary_report" in self.goal_to_tools:
+                selected_tools.extend(self.goal_to_tools["summary_report"])
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_tools = []
+        for tool in selected_tools:
+            if tool not in seen:
+                seen.add(tool)
+                unique_tools.append(tool)
         
         # Check for multi-step requirements
         if data_type == "timeseries" and goal != "feature_engineering":
             # May benefit from feature engineering first
             if "feature_engineering" in self.goal_to_tools.get("feature_engineering", []):
                 fe_tool = self.tool_registry.get("feature_engineering")
-                if fe_tool and "feature_engineering" not in available_tools:
-                    available_tools.insert(0, "feature_engineering")
+                if fe_tool and "feature_engineering" not in unique_tools:
+                    unique_tools.insert(0, "feature_engineering")
         
-        return available_tools
+        logger.info(f"Selected {len(unique_tools)} tools for goal '{goal}': {unique_tools}")
+        return unique_tools
     
     def _determine_strategy(
         self,

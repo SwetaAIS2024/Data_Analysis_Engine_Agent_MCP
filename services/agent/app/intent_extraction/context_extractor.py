@@ -92,6 +92,12 @@ class ContextExtractor:
             ],
             "geospatial_analysis": [
                 "geospatial", "map", "location", "spatial analysis"
+            ],
+            "report_generation": [
+                "report", "reporting", "generate report", "comprehensive report", "detailed report"
+            ],
+            "visualization": [
+                "visualize", "visualization", "chart", "graph", "plot"
             ]
         }
     
