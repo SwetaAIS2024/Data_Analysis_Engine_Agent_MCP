@@ -1,8 +1,7 @@
 """
-Planning & Decision Maker Module
-LLM-based planner with 50-word limit for efficient planning
-Supports unified (sequential) and parallel tool execution strategies
+MCP Tools Chaining Manager
+Planning, decision making, and conflict handling for tool execution
 """
-from .planner import TaskPlanner, ExecutionStrategy
+from .chaining_manager import MCPToolsChainingManager, ConflictResolution
 
-__all__ = ["TaskPlanner", "ExecutionStrategy"]
+__all__ = ["MCPToolsChainingManager", "ConflictResolution"]

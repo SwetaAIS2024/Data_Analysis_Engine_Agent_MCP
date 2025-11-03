@@ -1,8 +1,7 @@
 """
-Intent and Entity Extraction Module
-Supports multiple approaches: Rule-based (RLB), Regex, ML, and Hybrid
-Handles user input up to 500 words from VP (Voice/Text Interface)
+Context Extraction Module
+Extracts structured metadata from user prompts and data
 """
-from .extractor import IntentExtractor, ExtractionMethod
+from .context_extractor import ContextExtractor, ExtractionMethod
 
-__all__ = ["IntentExtractor", "ExtractionMethod"]
+__all__ = ["ContextExtractor", "ExtractionMethod"]

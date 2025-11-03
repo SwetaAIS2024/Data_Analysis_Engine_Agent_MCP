@@ -1,12 +1,8 @@
 """
-Observability module with timeline tracking
+Observability module with tracing
 """
-from .timeline import TimelineTracker, Timeline, TaskStatus, TaskEvent, FRAMEWORK_EXAMPLES
+from .otel import init_tracing
 
 __all__ = [
-    "TimelineTracker",
-    "Timeline",
-    "TaskStatus",
-    "TaskEvent",
-    "FRAMEWORK_EXAMPLES"
+    "init_tracing"
 ]
