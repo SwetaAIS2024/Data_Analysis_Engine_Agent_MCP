@@ -2,12 +2,11 @@ from fastapi import FastAPI, Body, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 import sys
+import uuid
+import time
 from .schemas.api import AnalyzeRequest, AnalyzeResponse, RunResponse
-from .router.rule_router import RuleRouter
-from .dispatcher.dispatcher import Dispatcher
 from .dispatcher.invocation_layer import MCPToolsInvocationLayer
 from .registry.registry import ToolRegistry
-from .security.auth import verify_jwt_stub
 from .observability.otel import init_tracing
 from .intent_extraction.context_extractor import ContextExtractor
 from .planner.chaining_manager import MCPToolsChainingManager
@@ -37,8 +36,6 @@ app.add_middleware(
 
 # Initialize components
 tool_registry = ToolRegistry()
-router = RuleRouter(tool_registry)
-dispatcher = Dispatcher(tool_registry)
 
 # V2 Simplified Pipeline Components
 context_extractor = ContextExtractor()
@@ -49,18 +46,13 @@ init_tracing(service_name="mcp-agent-v2")
 
 
 @app.post("/v2/analyze", response_model=AnalyzeResponse)
-def analyze_v2(req: AnalyzeRequest, authorization: str | None = Header(default=None)):
+def analyze_v2(req: AnalyzeRequest):
     """
     Simplified V2 Pipeline:
     Input (Data + Prompt) → Context Extraction → MCP Tools Chaining Manager → Tools Invocation → UI Output
     
     Each step has comprehensive logging.
     """
-    import uuid
-    import time
-    
-    # Auth (stub)
-    verify_jwt_stub(authorization)
     
     request_id = str(uuid.uuid4())
     start_time = time.time()
@@ -188,35 +180,14 @@ def analyze_v2(req: AnalyzeRequest, authorization: str | None = Header(default=N
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/v1/analyze", response_model=AnalyzeResponse)
-def analyze(req: AnalyzeRequest, authorization: str | None = Header(default=None)):
-    """
-    Legacy v1 endpoint (backward compatibility)
-    Uses simple rule-based routing without full pipeline
-    """
-    # auth (stub)
-    verify_jwt_stub(authorization)
-
-    # route
-    decision = router.route(req)
-    if not decision.tool:
-        raise HTTPException(status_code=400, detail="No matching tool for request")
-
-    # dispatch (sync path)
-    result = dispatcher.invoke(decision, req)
-    logger.info(f"Decision={decision.model_dump()}")
-    return AnalyzeResponse(
-        request_id=decision.request_id,
-        status="ok",
-        result=result.get("output", {}),
-        tool_meta={"invoked":[f"{decision.tool}@{decision.version}"], "trace_id": decision.trace_id}
-    )
-
 @app.get("/v1/tools")
 def list_tools():
+    """Get list of available tools"""
     return tool_registry.list_tools()
 
-@app.get("/v1/runs/{run_id}", response_model=RunResponse)
-def get_run(run_id: str):
-    # stub for now
-    return RunResponse(run_id=run_id, status="SUCCEEDED", steps=[])
+
+@app.get("/health")
+def health_check():
+    """Health check endpoint"""
+    return {"status": "healthy", "version": "v2.0.0"}
+
