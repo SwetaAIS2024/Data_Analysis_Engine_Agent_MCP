@@ -1,18 +1,32 @@
 from fastapi import FastAPI, Body, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
+import sys
 from .schemas.api import AnalyzeRequest, AnalyzeResponse, RunResponse
 from .router.rule_router import RuleRouter
 from .dispatcher.dispatcher import Dispatcher
+from .dispatcher.invocation_layer import MCPToolsInvocationLayer
 from .registry.registry import ToolRegistry
 from .security.auth import verify_jwt_stub
 from .observability.otel import init_tracing
-from .observability.timeline import TimelineTracker
-from .intent_extraction.extractor import IntentExtractor, ExtractionMethod
-from .planner.planner import TaskPlanner
+from .intent_extraction.context_extractor import ContextExtractor
+from .planner.chaining_manager import MCPToolsChainingManager
 
+# Configure logging
+logger.remove()
+logger.add(
+    sys.stdout,
+    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan> - <level>{message}</level>",
+    level="INFO"
+)
+logger.add(
+    "logs/agent_v2.log",
+    rotation="100 MB",
+    retention="7 days",
+    level="DEBUG"
+)
 
-app = FastAPI(title="MCP Agent v2", version="v2.0.0")
+app = FastAPI(title="MCP Agent v2 - Simplified Architecture", version="v2.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -25,148 +39,152 @@ app.add_middleware(
 tool_registry = ToolRegistry()
 router = RuleRouter(tool_registry)
 dispatcher = Dispatcher(tool_registry)
-timeline_tracker = TimelineTracker()
 
-# New v2 components
-intent_extractor = IntentExtractor(method=ExtractionMethod.HYBRID)
-task_planner = TaskPlanner()
+# V2 Simplified Pipeline Components
+context_extractor = ContextExtractor()
+chaining_manager = MCPToolsChainingManager(tool_registry)
+invocation_layer = MCPToolsInvocationLayer(tool_registry)
 
 init_tracing(service_name="mcp-agent-v2")
-
-
-def _aggregate_results(execution_result: dict) -> dict:
-    """
-    Aggregate results from multiple tool executions
-    Combines outputs from parallel or sequential tasks
-    """
-    results = execution_result.get("results", [])
-    
-    if not results:
-        return {"status": "no_results", "message": "No tool results to aggregate"}
-    
-    # If single result, return it directly
-    if len(results) == 1:
-        return results[0].get("output", {})
-    
-    # Multiple results: combine them
-    aggregated = {
-        "combined_results": [],
-        "summary": {
-            "total_tasks": len(results),
-            "successful_tasks": sum(1 for r in results if r.get("status") == "success"),
-            "failed_tasks": sum(1 for r in results if r.get("status") == "error")
-        }
-    }
-    
-    for result in results:
-        if result.get("status") == "success":
-            tool_output = result.get("output", {})
-            aggregated["combined_results"].append({
-                "tool": result.get("tool"),
-                "output": tool_output
-            })
-    
-    return aggregated
 
 
 @app.post("/v2/analyze", response_model=AnalyzeResponse)
 def analyze_v2(req: AnalyzeRequest, authorization: str | None = Header(default=None)):
     """
-    Enhanced v2 endpoint with full pipeline:
-    User Input (500 words) -> Intent Extraction (RLB/Regex/ML/Hybrid) 
-    -> Planning (LLM, 50 words) -> Tool Invocation (Dispatcher, unified/parallel)
+    Simplified V2 Pipeline:
+    Input (Data + Prompt) → Context Extraction → MCP Tools Chaining Manager → Tools Invocation → UI Output
+    
+    Each step has comprehensive logging.
     """
+    import uuid
+    import time
+    
     # Auth (stub)
     verify_jwt_stub(authorization)
     
-    # Start timeline tracking
-    timeline = timeline_tracker.start_request(req.tenant_id)
+    request_id = str(uuid.uuid4())
+    start_time = time.time()
+    
+    logger.info(f"[REQUEST {request_id}] Starting V2 pipeline")
+    logger.info(f"[REQUEST {request_id}] Tenant: {req.tenant_id}")
     
     try:
-        # Step 1: Intent Extraction (Person 1)
-        timeline_tracker.log_task_start(timeline, "intent", "Intent & Entity Extraction")
+        # STEP 1: CONTEXT EXTRACTION
+        logger.info(f"[REQUEST {request_id}] STEP 1: Context Extraction - START")
         
-        # Extract user input from context or use task
-        user_input = req.context.get("user_input") or req.context.get("task", "")
-        if not user_input:
-            user_input = f"{req.context.get('task', 'analyze')} with metric {req.params.get('metric', 'unknown')}"
+        # Build user prompt from request
+        user_prompt = req.context.get("task", "")
+        if not user_prompt:
+            user_prompt = f"Analyze data with metric: {req.params.get('metric', 'unknown')}"
         
-        extraction_result = intent_extractor.extract(user_input)
-        timeline_tracker.log_task_complete(
-            timeline, "intent",
-            metadata={
-                "intent": extraction_result["intent"],
-                "confidence": extraction_result["confidence"],
-                "method": extraction_result["method_used"]
+        # Extract context metadata
+        context_result = context_extractor.extract(
+            prompt=user_prompt,
+            data_sample=req.data_pointer.rows[:5] if req.data_pointer.rows else []
+        )
+        
+        logger.info(f"[REQUEST {request_id}] Context extracted - Goal: {context_result['goal']}")
+        logger.info(f"[REQUEST {request_id}] Data type: {context_result['data_type']}")
+        logger.info(f"[REQUEST {request_id}] Constraints: {context_result['constraints']}")
+        logger.info(f"[REQUEST {request_id}] Parameters: {context_result['parameters']}")
+        logger.info(f"[REQUEST {request_id}] STEP 1: Context Extraction - COMPLETE")
+        
+        # STEP 2: MCP TOOLS CHAINING MANAGER (Planning & Decision Making)
+        logger.info(f"[REQUEST {request_id}] STEP 2: MCP Tools Chaining Manager - START")
+        
+        execution_plan = chaining_manager.create_execution_plan(
+            context_metadata=context_result,
+            available_tools=tool_registry.list_tools()
+        )
+        
+        logger.info(f"[REQUEST {request_id}] Execution plan created")
+        logger.info(f"[REQUEST {request_id}] Strategy: {execution_plan['execution_plan']['strategy']}")
+        logger.info(f"[REQUEST {request_id}] Tools: {[t['tool_id'] for t in execution_plan['execution_plan']['tools']]}")
+        logger.info(f"[REQUEST {request_id}] Conflicts detected: {len(execution_plan['conflicts'])}")
+        logger.info(f"[REQUEST {request_id}] Requires user feedback: {execution_plan['requires_user_feedback']}")
+        
+        if execution_plan.get("reasoning"):
+            logger.info(f"[REQUEST {request_id}] Reasoning: {execution_plan['reasoning']}")
+        
+        logger.info(f"[REQUEST {request_id}] STEP 2: MCP Tools Chaining Manager - COMPLETE")
+        
+        # STEP 3: TOOLS INVOCATION
+        logger.info(f"[REQUEST {request_id}] STEP 3: Tools Invocation - START")
+        
+        # Build request data for tools
+        request_data = {
+            "input": {
+                "rows": req.data_pointer.rows or [],
+                "columns": list(req.data_pointer.rows[0].keys()) if req.data_pointer.rows else []
+            },
+            "params": {
+                **req.params,
+                **context_result["parameters"]
+            },
+            "context": {
+                **req.context,
+                "goal": context_result["goal"],
+                "data_type": context_result["data_type"]
             }
-        )
-        logger.info(f"Intent extraction: {extraction_result['intent']} (confidence: {extraction_result['confidence']})")
+        }
         
-        # Step 2: Planning & Decision Making (Person 1)
-        timeline_tracker.log_task_start(timeline, "planning", "Planning & Decision Making")
-        
-        plan = task_planner.create_plan(
-            intent=extraction_result["intent"],
-            entities=extraction_result["entities"],
-            data_info={"row_count": len(req.data_pointer.rows) if req.data_pointer.rows else 0},
-            context=req.context
-        )
-        timeline_tracker.log_task_complete(
-            timeline, "planning",
-            metadata={
-                "task_count": len(plan["tasks"]),
-                "strategy": plan["strategy"],
-                "reasoning": plan["reasoning"]
-            }
-        )
-        logger.info(f"Plan created: {len(plan['tasks'])} tasks, strategy={plan['strategy']}")
-        
-        # Step 3: Tool Invocation (Person 2)
-        timeline_tracker.log_task_start(timeline, "execution", "Tool Execution (Dispatcher)")
-        
-        # Execute plan
-        plan["trace_id"] = timeline.request_id
-        execution_result = dispatcher.execute_plan(plan, req)
-        
-        timeline_tracker.log_task_complete(
-            timeline, "execution",
-            metadata={
-                "results_count": len(execution_result.get("results", [])),
-                "strategy_used": execution_result.get("strategy")
-            }
+        # Execute tools
+        invocation_result = invocation_layer.execute(
+            execution_plan=execution_plan,
+            request_data=request_data
         )
         
-        # Step 4: Result Aggregation (Person 2)
-        timeline_tracker.log_task_start(timeline, "aggregation", "Result Aggregation")
+        logger.info(f"[REQUEST {request_id}] Invocation status: {invocation_result['status']}")
+        logger.info(f"[REQUEST {request_id}] Results: {invocation_result.get('summary', {})}")
         
-        # Aggregate results from all tasks
-        aggregated_output = _aggregate_results(execution_result)
+        if invocation_result.get("user_feedback_required"):
+            logger.warning(f"[REQUEST {request_id}] User feedback required")
+            logger.info(f"[REQUEST {request_id}] Feedback options: {invocation_result['user_feedback_required']}")
         
-        timeline_tracker.log_task_complete(timeline, "aggregation")
+        logger.info(f"[REQUEST {request_id}] STEP 3: Tools Invocation - COMPLETE")
         
-        # Complete timeline
-        completed_timeline = timeline_tracker.complete_request(req.tenant_id)
+        # STEP 4: UI OUTPUT PREPARATION
+        logger.info(f"[REQUEST {request_id}] STEP 4: UI Output Preparation - START")
+        
+        # Aggregate tool results
+        final_output = {
+            "status": invocation_result["status"],
+            "results": invocation_result.get("results", []),
+            "summary": invocation_result.get("summary", {}),
+            "user_feedback": invocation_result.get("user_feedback_required")
+        }
+        
+        duration = time.time() - start_time
+        logger.info(f"[REQUEST {request_id}] Pipeline duration: {duration:.2f}s")
+        logger.info(f"[REQUEST {request_id}] STEP 4: UI Output Preparation - COMPLETE")
+        logger.info(f"[REQUEST {request_id}] Pipeline FINISHED - Status: {invocation_result['status']}")
         
         return AnalyzeResponse(
-            request_id=timeline.request_id,
+            request_id=request_id,
             status="ok",
-            result=aggregated_output,
+            result=final_output,
             tool_meta={
-                "pipeline_version": "v2",
-                "intent": extraction_result["intent"],
-                "confidence": extraction_result["confidence"],
-                "extraction_method": extraction_result["method_used"],
-                "plan": plan,
-                "execution_strategy": execution_result.get("strategy"),
-                "timeline": completed_timeline.to_dict() if completed_timeline else None,
-                "duration_seconds": completed_timeline.get_duration() if completed_timeline else 0
+                "pipeline_version": "v2_simplified",
+                "context_extraction": {
+                    "goal": context_result["goal"],
+                    "data_type": context_result["data_type"],
+                    "constraints": context_result["constraints"]
+                },
+                "execution_plan": {
+                    "strategy": execution_plan["execution_plan"]["strategy"],
+                    "tools": [t["tool_id"] for t in execution_plan["execution_plan"]["tools"]],
+                    "conflicts": execution_plan["conflicts"]
+                },
+                "invocation_status": invocation_result["status"],
+                "duration_seconds": duration
             }
         )
     
     except Exception as e:
-        timeline_tracker.log_task_failed(timeline, "pipeline", str(e))
-        timeline_tracker.complete_request(req.tenant_id)
-        logger.error(f"Pipeline error: {str(e)}")
+        duration = time.time() - start_time
+        logger.error(f"[REQUEST {request_id}] Pipeline FAILED after {duration:.2f}s")
+        logger.error(f"[REQUEST {request_id}] Error: {str(e)}")
+        logger.exception(e)
         raise HTTPException(status_code=500, detail=str(e))
 
 

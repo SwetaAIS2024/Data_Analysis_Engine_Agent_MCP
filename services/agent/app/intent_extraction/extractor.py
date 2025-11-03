@@ -1,11 +1,16 @@
 """
-Intent and Entity Extraction - Multiple Approaches
-Extracts user intent and entities from natural language input (up to 500 words)
-Supports: Rule-based (RLB), Regex, ML, and Hybrid extraction
+User Intent / Context Extraction Layer
+Extracts structured metadata from user prompt and data:
+- Goal: What the user wants to achieve
+- Constraints: Limitations, thresholds, requirements
+- Data Type: Tabular, timeseries, geospatial, etc.
+- Parameters: Specific values for tool execution
+Supports: Rule-based, Regex, ML, and Hybrid extraction
 """
 import re
 from typing import Dict, Any, List, Optional
 from enum import Enum
+import json
 
 
 class ExtractionMethod(Enum):
@@ -16,7 +21,7 @@ class ExtractionMethod(Enum):
     HYBRID = "hybrid"  # Combination of methods
 
 
-class IntentExtractor:
+class ContextExtractor:
     """
     Unified intent and entity extractor supporting multiple approaches:
     - Rule-based (RLB): Pattern matching with predefined rules
