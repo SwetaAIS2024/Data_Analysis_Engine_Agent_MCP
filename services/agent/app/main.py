@@ -69,10 +69,19 @@ def analyze_v2(req: AnalyzeRequest):
         if not user_prompt:
             user_prompt = f"Analyze data with metric: {req.params.get('metric', 'unknown')}"
         
+        # Prepare data info for context extraction
+        data_info = None
+        if req.data_pointer.rows:
+            data_info = {
+                "rows": req.data_pointer.rows[:5],  # Sample first 5 rows
+                "row_count": len(req.data_pointer.rows),
+                "columns": list(req.data_pointer.rows[0].keys()) if req.data_pointer.rows else []
+            }
+        
         # Extract context metadata
         context_result = context_extractor.extract(
-            prompt=user_prompt,
-            data_sample=req.data_pointer.rows[:5] if req.data_pointer.rows else []
+            user_prompt=user_prompt,
+            data_info=data_info
         )
         
         logger.info(f"[REQUEST {request_id}] Context extracted - Goal: {context_result['goal']}")
@@ -85,8 +94,7 @@ def analyze_v2(req: AnalyzeRequest):
         logger.info(f"[REQUEST {request_id}] STEP 2: MCP Tools Chaining Manager - START")
         
         execution_plan = chaining_manager.create_execution_plan(
-            context_metadata=context_result,
-            available_tools=tool_registry.list_tools()
+            metadata=context_result
         )
         
         logger.info(f"[REQUEST {request_id}] Execution plan created")
