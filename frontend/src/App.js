@@ -854,44 +854,254 @@ function App() {
             </div>
           )}
           
+          {/* Pipeline Execution Logs - NEW SECTION */}
+          {result.result?.pipeline_logs && result.result.pipeline_logs.length > 0 && (
+            <div style={{ 
+              marginBottom: "1rem", 
+              padding: "1rem", 
+              backgroundColor: "#f5f5f5", 
+              borderRadius: "4px",
+              maxHeight: "600px",
+              overflowY: "auto"
+            }}>
+              <h4 style={{ marginBottom: "1rem", display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "1.2em" }}>
+                📊 Pipeline Execution Logs
+                <span style={{ 
+                  fontSize: "0.75em", 
+                  fontWeight: "normal", 
+                  color: "#666",
+                  backgroundColor: "#e0e0e0",
+                  padding: "3px 10px",
+                  borderRadius: "12px"
+                }}>
+                  {result.result.pipeline_logs.length} events
+                </span>
+              </h4>
+              
+              <div style={{ fontFamily: "monospace", fontSize: "0.95em" }}>
+                {result.result.pipeline_logs.map((log, idx) => {
+                  const layerColors = {
+                    "PIPELINE": "#9c27b0",
+                    "CONTEXT_EXTRACTION": "#2196f3",
+                    "CHAINING_MANAGER": "#ff9800",
+                    "INVOCATION_LAYER": "#4caf50",
+                    "OUTPUT_PREPARATION": "#00bcd4"
+                  };
+                  
+                  const levelColors = {
+                    "INFO": "#2196f3",
+                    "SUCCESS": "#4caf50",
+                    "WARNING": "#ff9800",
+                    "ERROR": "#f44336"
+                  };
+                  
+                  const levelBackgrounds = {
+                    "INFO": "#e3f2fd",
+                    "SUCCESS": "#e8f5e9",
+                    "WARNING": "#fff3e0",
+                    "ERROR": "#ffebee"
+                  };
+                  
+                  return (
+                    <div key={idx} style={{ 
+                      marginBottom: "0.6rem", 
+                      padding: "0.85rem",
+                      backgroundColor: levelBackgrounds[log.level] || "#ffffff",
+                      borderLeft: `4px solid ${levelColors[log.level] || "#666"}`,
+                      borderRadius: "4px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "0.35rem"
+                    }}>
+                      {/* Log Header */}
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap" }}>
+                        <span style={{ 
+                          backgroundColor: layerColors[log.layer] || "#666",
+                          color: "white",
+                          padding: "3px 10px",
+                          borderRadius: "4px",
+                          fontSize: "0.85em",
+                          fontWeight: "bold",
+                          whiteSpace: "nowrap"
+                        }}>
+                          {log.layer.replace(/_/g, ' ')}
+                        </span>
+                        
+                        <span style={{ 
+                          color: levelColors[log.level] || "#666",
+                          fontWeight: "bold",
+                          fontSize: "0.85em"
+                        }}>
+                          {log.level}
+                        </span>
+                        
+                        <span style={{ 
+                          color: "#999",
+                          fontSize: "0.8em",
+                          marginLeft: "auto"
+                        }}>
+                          {new Date(log.timestamp * 1000).toLocaleTimeString()}
+                        </span>
+                      </div>
+                      
+                      {/* Log Message */}
+                      <div style={{ 
+                        fontSize: "1em",
+                        color: "#222",
+                        paddingLeft: "0.5rem",
+                        fontWeight: "500",
+                        lineHeight: "1.5"
+                      }}>
+                        {log.message}
+                      </div>
+                      
+                      {/* Log Details (if any) */}
+                      {log.details && Object.keys(log.details).length > 0 && (
+                        <details style={{ paddingLeft: "0.5rem", marginTop: "0.3rem" }}>
+                          <summary style={{ 
+                            cursor: "pointer", 
+                            fontSize: "0.9em",
+                            color: "#666",
+                            userSelect: "none",
+                            fontWeight: "500"
+                          }}>
+                            📋 Details ({Object.keys(log.details).length} items)
+                          </summary>
+                          <div style={{ 
+                            marginTop: "0.6rem",
+                            padding: "0.7rem",
+                            backgroundColor: "rgba(0,0,0,0.03)",
+                            borderRadius: "4px",
+                            fontSize: "0.95em"
+                          }}>
+                            {Object.entries(log.details).map(([key, value]) => (
+                              <div key={key} style={{ marginBottom: "0.35rem", lineHeight: "1.5" }}>
+                                <strong style={{ color: "#555" }}>{key}:</strong>{' '}
+                                <span style={{ color: "#333" }}>
+                                  {typeof value === 'object' 
+                                    ? JSON.stringify(value, null, 2) 
+                                    : String(value)}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </details>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          
           {/* Tool Invocation Logs */}
           {result.result?.results && result.result.results.length > 0 && result.result?.status !== "clarification_required" && (
             <div style={{ marginBottom: "1rem", padding: "1rem", backgroundColor: "#e3f2fd", borderRadius: "4px" }}>
               <h4>🔧 Tool Invocation Log</h4>
+              
+              {/* Overall Status Message */}
+              {result.result?.status_message && (
+                <div style={{ 
+                  marginBottom: "1rem", 
+                  padding: "0.75rem", 
+                  backgroundColor: result.result.status === "success" ? "#e8f5e9" : "#fff3e0",
+                  borderRadius: "4px",
+                  fontWeight: "bold",
+                  fontSize: "1.05em"
+                }}>
+                  {result.result.status_message}
+                </div>
+              )}
+              
               <div style={{ fontFamily: "monospace", fontSize: "0.9em" }}>
                 {result.result.results.map((toolResult, idx) => (
                   <div key={idx} style={{ 
-                    marginBottom: "0.5rem", 
-                    padding: "0.75rem", 
+                    marginBottom: "0.75rem", 
+                    padding: "1rem", 
                     backgroundColor: "white",
                     borderLeft: `4px solid ${toolResult.status === "success" ? "#4caf50" : toolResult.status === "error" ? "#f44336" : "#ff9800"}`,
-                    borderRadius: "2px"
+                    borderRadius: "4px",
+                    boxShadow: "0 2px 4px rgba(0,0,0,0.1)"
                   }}>
-                    <div style={{ display: "flex", alignItems: "center", marginBottom: "0.25rem" }}>
-                      <span style={{ 
-                        fontSize: "1.2em", 
-                        marginRight: "0.5rem"
-                      }}>
+                    {/* Tool Header */}
+                    <div style={{ display: "flex", alignItems: "center", marginBottom: "0.5rem" }}>
+                      <span style={{ fontSize: "1.3em", marginRight: "0.5rem" }}>
                         {toolResult.status === "success" ? "✅" : toolResult.status === "error" ? "❌" : "⚠️"}
                       </span>
-                      <strong style={{ flex: 1 }}>{toolResult.tool_id}</strong>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: "bold", fontSize: "1.1em" }}>
+                          {toolResult.tool_name || toolResult.tool_id}
+                        </div>
+                        {toolResult.tool_name && toolResult.tool_name !== toolResult.tool_id && (
+                          <div style={{ fontSize: "0.85em", color: "#666" }}>
+                            ({toolResult.tool_id})
+                          </div>
+                        )}
+                      </div>
                       <span style={{ 
-                        padding: "2px 8px", 
-                        borderRadius: "3px",
+                        padding: "4px 12px", 
+                        borderRadius: "12px",
                         fontSize: "0.85em",
+                        fontWeight: "bold",
                         backgroundColor: toolResult.status === "success" ? "#e8f5e9" : toolResult.status === "error" ? "#ffebee" : "#fff3e0",
                         color: toolResult.status === "success" ? "#2e7d32" : toolResult.status === "error" ? "#c62828" : "#e65100"
                       }}>
-                        {toolResult.status}
+                        {toolResult.status.toUpperCase()}
                       </span>
                     </div>
-                    {toolResult.error && (
-                      <div style={{ color: "#d32f2f", marginTop: "0.25rem", fontSize: "0.9em" }}>
-                        <strong>Error:</strong> {toolResult.error}
+                    
+                    {/* Status Message */}
+                    {toolResult.status_message && (
+                      <div style={{ 
+                        marginBottom: "0.5rem", 
+                        padding: "0.5rem", 
+                        backgroundColor: "#f5f5f5", 
+                        borderRadius: "3px",
+                        fontSize: "0.95em"
+                      }}>
+                        {toolResult.status_message}
                       </div>
                     )}
-                    {toolResult.output && toolResult.status === "success" && (
-                      <div style={{ marginTop: "0.5rem", color: "#555" }}>
+                    
+                    {/* Error Details */}
+                    {toolResult.error && (
+                      <div style={{ 
+                        color: "#d32f2f", 
+                        marginTop: "0.5rem", 
+                        padding: "0.5rem",
+                        backgroundColor: "#ffebee",
+                        borderRadius: "3px",
+                        fontSize: "0.9em"
+                      }}>
+                        <strong>❌ Error:</strong> {toolResult.error}
+                      </div>
+                    )}
+                    
+                    {/* Execution Summary (NEW - from backend) */}
+                    {toolResult.execution_summary && Object.keys(toolResult.execution_summary).length > 0 && (
+                      <div style={{ 
+                        marginTop: "0.75rem", 
+                        padding: "0.75rem", 
+                        backgroundColor: "#e8f5e9", 
+                        borderRadius: "4px" 
+                      }}>
+                        <div style={{ fontWeight: "bold", marginBottom: "0.5rem", color: "#2e7d32" }}>
+                          📊 Execution Summary:
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "0.5rem" }}>
+                          {Object.entries(toolResult.execution_summary).map(([key, value]) => (
+                            <div key={key} style={{ fontSize: "0.9em" }}>
+                              <span style={{ color: "#666" }}>{key.replace(/_/g, ' ')}:</span>{' '}
+                              <strong>{Array.isArray(value) ? `[${value.slice(0, 3).join(', ')}${value.length > 3 ? '...' : ''}]` : String(value)}</strong>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Legacy Output Display (Fallback) */}
+                    {toolResult.output && toolResult.status === "success" && !toolResult.execution_summary && (
+                      <div style={{ marginTop: "0.5rem", color: "#555", fontSize: "0.9em" }}>
                         {/* Anomaly Detection */}
                         {toolResult.output.anomalies && (
                           <div>📊 <strong>{toolResult.output.anomalies.length}</strong> anomalies detected</div>

@@ -11,6 +11,7 @@ import logging
 from typing import Dict, Any, List, Optional
 from enum import Enum
 import json
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,7 @@ class ExtractionMethod(Enum):
     RULE_BASED = "rule_based"
     REGEX = "regex"
     ML = "ml"
+    LLM = "llm"  # LLM-powered extraction
     HYBRID = "hybrid"
 
 
@@ -52,8 +54,10 @@ class ContextExtractor:
     
     def __init__(self, method: ExtractionMethod = ExtractionMethod.HYBRID):
         self.method = method
+        self.adaptive_mode = os.getenv("ADAPTIVE_EXTRACTION", "false").lower() == "true"
+        self.enable_fallback_chain = os.getenv("ENABLE_FALLBACK_CHAIN", "true").lower() == "true"  # Default TRUE
         self._init_extractors()
-        logger.info(f"ContextExtractor initialized with method: {method.value}")
+        logger.info(f"ContextExtractor initialized with method: {method.value}, adaptive: {self.adaptive_mode}, fallback_chain: {self.enable_fallback_chain}")
     
     def _init_extractors(self):
         """Initialize extraction components"""
@@ -67,25 +71,33 @@ class ContextExtractor:
         return {
             "anomaly_detection": [
                 "detect anomalies", "find outliers", "identify unusual",
-                "spot anomalies", "anomaly detection", "outlier detection"
+                "spot anomalies", "anomaly detection", "outlier detection",
+                "find anomalies", "detect outliers", "anomalies", "outliers",
+                "unusual patterns", "abnormal", "detect anomaly", "find anomaly",
+                "anomaly", "outlier",
+                # Common misspellings
+                "anomoly", "anomolies", "detect anomoly", "find anomoly"
             ],
             "clustering": [
                 "cluster", "group data", "segment", "clustering",
-                "find patterns", "group similar"
+                "find patterns", "group similar", "segment data"
             ],
             "feature_engineering": [
                 "engineer features", "create features", "feature extraction",
-                "transform data", "generate features"
+                "transform data", "generate features", "feature engineering"
             ],
             "timeseries_forecasting": [
                 "forecast", "predict future", "prediction",
-                "trend analysis", "time series forecast"
+                "trend analysis", "time series forecast", "forecasting",
+                "predict trend", "future prediction"
             ],
             "classification": [
-                "classify", "classification", "categorize", "predict class"
+                "classify", "classification", "categorize", "predict class",
+                "classifier"
             ],
             "regression": [
-                "regression", "predict value", "estimate", "predict number"
+                "regression", "predict value", "estimate", "predict number",
+                "regressor"
             ],
             "stats_comparison": [
                 "compare", "comparison", "a/b test", "statistical test"
@@ -134,6 +146,108 @@ class ContextExtractor:
             "max_memory": r"(?:up to|maximum)\s+(\d+)\s*(MB|GB)",
         }
     
+    def _select_best_method(self, user_prompt: str, data_info: dict) -> ExtractionMethod:
+        """
+        Intelligently select the best extraction method based on:
+        1. Prompt characteristics (length, complexity, keywords)
+        2. API availability (LLM providers)
+        3. Data context
+        4. Performance requirements
+        
+        Selection Heuristics:
+        - Simple prompts (<20 words, clear keywords) → RULE_BASED (fastest)
+        - Medium complexity (20-50 words, some context) → HYBRID (balanced)
+        - Complex prompts (>50 words, nuanced) → LLM (most accurate)
+        - No API key → Fallback to HYBRID/RULE_BASED
+        """
+        prompt_lower = user_prompt.lower()
+        word_count = len(user_prompt.split())
+        
+        # Calculate complexity score
+        complexity_score = 0
+        
+        # Factor 1: Length (0-3 points)
+        if word_count < 10:
+            complexity_score += 0
+        elif word_count < 25:
+            complexity_score += 1
+        elif word_count < 50:
+            complexity_score += 2
+        else:
+            complexity_score += 3
+        
+        # Factor 2: Contains negations or conditions (0-2 points)
+        negation_words = ['not', 'without', 'except', 'exclude', 'ignore']
+        conditional_words = ['if', 'when', 'where', 'unless', 'provided']
+        if any(word in prompt_lower for word in negation_words):
+            complexity_score += 1
+        if any(word in prompt_lower for word in conditional_words):
+            complexity_score += 1
+        
+        # Factor 3: Multiple clauses/sentences (0-2 points)
+        sentence_count = prompt_lower.count('.') + prompt_lower.count('?') + prompt_lower.count('!')
+        if sentence_count > 1:
+            complexity_score += 1
+        if prompt_lower.count(',') > 2:
+            complexity_score += 1
+        
+        # Factor 4: Contains tool-specific keywords (reduces complexity for rule-based)
+        tool_keywords = [
+            'detect', 'anomaly', 'forecast', 'cluster', 'classify',
+            'regression', 'compare', 'statistics', 'geospatial', 'map'
+        ]
+        has_clear_tool_match = any(kw in prompt_lower for kw in tool_keywords)
+        
+        logger.debug(f"Prompt analysis: words={word_count}, complexity={complexity_score}, has_tool_match={has_clear_tool_match}")
+        
+        # Decision logic based on complexity score (0-8 range)
+        if complexity_score <= 2 and has_clear_tool_match:
+            # Simple, clear prompts → RULE_BASED (fast, deterministic)
+            logger.info("Selected RULE_BASED: Simple prompt with clear tool keywords")
+            return ExtractionMethod.RULE_BASED
+        
+        elif complexity_score >= 6:
+            # Complex prompts → Try LLM if available
+            if self._check_llm_availability():
+                logger.info("Selected LLM: Complex prompt, API available")
+                return ExtractionMethod.LLM
+            else:
+                logger.info("Selected HYBRID: Complex prompt but no LLM API, using hybrid fallback")
+                return ExtractionMethod.HYBRID
+        
+        else:
+            # Medium complexity → HYBRID (balanced approach)
+            logger.info("Selected HYBRID: Medium complexity prompt")
+            return ExtractionMethod.HYBRID
+    
+    def _check_llm_availability(self) -> bool:
+        """Check if LLM API is configured and available"""
+        provider = os.getenv("LLM_PROVIDER", "openai").lower()
+        
+        if provider == "openai":
+            api_key = os.getenv("OPENAI_API_KEY")
+            available = bool(api_key and api_key.strip())
+            if available:
+                logger.debug("OpenAI API key found")
+            return available
+        
+        elif provider == "anthropic":
+            api_key = os.getenv("ANTHROPIC_API_KEY")
+            available = bool(api_key and api_key.strip())
+            if available:
+                logger.debug("Anthropic API key found")
+            return available
+        
+        elif provider == "local":
+            # Local LLM via Ollama - check if URL configured
+            local_url = os.getenv("LOCAL_LLM_URL", "http://localhost:11434")
+            available = bool(local_url)
+            if available:
+                logger.debug(f"Local LLM URL configured: {local_url}")
+            return available
+        
+        return False
+    
     def extract(
         self,
         user_prompt: str,
@@ -141,6 +255,10 @@ class ContextExtractor:
     ) -> Dict[str, Any]:
         """
         Extract structured metadata from user prompt and data
+        
+        Supports two modes:
+        1. Single method extraction (default)
+        2. Fallback chain: RULE_BASED → ML → LLM → User Clarification
         
         Args:
             user_prompt: User's natural language prompt
@@ -158,17 +276,249 @@ class ContextExtractor:
         """
         logger.info(f"Extracting context from prompt: {user_prompt[:100]}...")
         
-        if self.method == ExtractionMethod.RULE_BASED:
+        # FALLBACK CHAIN MODE: Try multiple methods in sequence
+        if self.enable_fallback_chain:
+            logger.info("🔗 Fallback chain enabled - will try multiple extraction methods")
+            return self._extract_with_fallback_chain(user_prompt, data_info)
+        
+        # SINGLE METHOD MODE: Use adaptive or fixed method selection
+        if self.adaptive_mode:
+            selected_method = self._select_best_method(user_prompt, data_info)
+            logger.info(f"Adaptive mode: selected {selected_method.value} for this prompt")
+        else:
+            selected_method = self.method
+        
+        if selected_method == ExtractionMethod.RULE_BASED:
             result = self._rule_based_extraction(user_prompt, data_info)
-        elif self.method == ExtractionMethod.REGEX:
+        elif selected_method == ExtractionMethod.REGEX:
             result = self._regex_extraction(user_prompt, data_info)
-        elif self.method == ExtractionMethod.ML:
+        elif selected_method == ExtractionMethod.ML:
             result = self._ml_extraction(user_prompt, data_info)
+        elif selected_method == ExtractionMethod.LLM:
+            result = self._llm_extraction(user_prompt, data_info)
         else:  # HYBRID
             result = self._hybrid_extraction(user_prompt, data_info)
         
         logger.info(f"Extracted goal: {result['goal']}, data_type: {result['data_type']}")
         return result
+    
+    def _extract_with_fallback_chain(
+        self,
+        user_prompt: str,
+        data_info: Optional[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """
+        Consensus-Based Fallback Chain: Try ALL methods and use voting
+        
+        Strategy:
+        1. Try RULE_BASED, ML, and LLM (all available methods)
+        2. Collect all results that don't require clarification
+        3. Use CONSENSUS (majority vote) to determine final goal
+        4. If all agree → High confidence result
+        5. If majority agrees → Medium confidence result
+        6. If no consensus → Use highest confidence method OR ask for clarification
+        
+        Returns:
+            Consensus result with metadata about all attempts
+        """
+        logger.info("🔗 Starting consensus-based fallback chain extraction")
+        logger.info("📊 Strategy: Try all methods, use voting to determine final answer")
+        
+        # Track all extraction attempts
+        all_results = []
+        goal_votes = {}  # goal -> count
+        
+        # ========== ATTEMPT 1: RULE-BASED ==========
+        logger.info("📍 Method 1/3: Trying RULE_BASED extraction...")
+        try:
+            rule_result = self._rule_based_extraction(user_prompt, data_info)
+            
+            if not rule_result.get("requires_clarification"):
+                goal = rule_result.get("goal", "unknown")
+                confidence = rule_result.get("confidence", 0.0)
+                
+                all_results.append({
+                    "method": "rule_based",
+                    "goal": goal,
+                    "confidence": confidence,
+                    "status": "success",
+                    "result": rule_result
+                })
+                
+                # Vote for this goal
+                goal_votes[goal] = goal_votes.get(goal, 0) + 1
+                logger.info(f"✅ RULE_BASED voted for: {goal} (confidence: {confidence:.2f})")
+            else:
+                all_results.append({
+                    "method": "rule_based",
+                    "status": "requires_clarification"
+                })
+                logger.warning("⚠️ RULE_BASED: Requires clarification")
+        except Exception as e:
+            logger.error(f"❌ RULE_BASED failed: {e}")
+            all_results.append({
+                "method": "rule_based",
+                "status": "failed",
+                "error": str(e)
+            })
+        
+        # ========== ATTEMPT 2: ML-BASED ==========
+        logger.info("📍 Method 2/3: Trying ML extraction...")
+        try:
+            ml_result = self._ml_extraction(user_prompt, data_info)
+            
+            # Check if ML actually ran (not just fallback to rules)
+            if ml_result.get("extraction_method") == "ml" and not ml_result.get("requires_clarification"):
+                goal = ml_result.get("goal", "unknown")
+                confidence = ml_result.get("confidence", 0.0)
+                
+                all_results.append({
+                    "method": "ml",
+                    "goal": goal,
+                    "confidence": confidence,
+                    "status": "success",
+                    "result": ml_result
+                })
+                
+                # Vote for this goal
+                goal_votes[goal] = goal_votes.get(goal, 0) + 1
+                logger.info(f"✅ ML voted for: {goal} (confidence: {confidence:.2f})")
+            else:
+                all_results.append({
+                    "method": "ml",
+                    "status": "not_available"
+                })
+                logger.warning("⚠️ ML: Not available or fell back to rules")
+        except Exception as e:
+            logger.error(f"❌ ML failed: {e}")
+            all_results.append({
+                "method": "ml",
+                "status": "failed",
+                "error": str(e)
+            })
+        
+        # ========== ATTEMPT 3: LLM-BASED ==========
+        if self._check_llm_availability():
+            logger.info("📍 Method 3/3: Trying LLM extraction...")
+            try:
+                llm_result = self._llm_extraction(user_prompt, data_info)
+                
+                if not llm_result.get("requires_clarification"):
+                    goal = llm_result.get("goal", "unknown")
+                    confidence = llm_result.get("confidence", 0.0)
+                    
+                    all_results.append({
+                        "method": "llm",
+                        "goal": goal,
+                        "confidence": confidence,
+                        "status": "success",
+                        "result": llm_result
+                    })
+                    
+                    # Vote for this goal (LLM gets 2 votes due to higher accuracy)
+                    goal_votes[goal] = goal_votes.get(goal, 0) + 2
+                    logger.info(f"✅ LLM voted for: {goal} (confidence: {confidence:.2f}) [2 votes]")
+                else:
+                    all_results.append({
+                        "method": "llm",
+                        "status": "requires_clarification"
+                    })
+                    logger.warning("⚠️ LLM: Requires clarification")
+            except Exception as e:
+                logger.error(f"❌ LLM failed: {e}")
+                all_results.append({
+                    "method": "llm",
+                    "status": "failed",
+                    "error": str(e)
+                })
+        else:
+            logger.info("⏭️ Method 3/3: Skipping LLM (API not available)")
+            all_results.append({
+                "method": "llm",
+                "status": "skipped",
+                "reason": "API not configured"
+            })
+        
+        # ========== CONSENSUS ANALYSIS ==========
+        logger.info("�️ Analyzing votes from all methods...")
+        logger.info(f"Vote counts: {goal_votes}")
+        
+        # Get successful results only
+        successful_results = [r for r in all_results if r.get("status") == "success"]
+        
+        if not successful_results:
+            # NO METHOD SUCCEEDED → Ask for clarification
+            logger.warning("⚠️ All methods failed or require clarification")
+            clarification_result = self._create_clarification_request(user_prompt, {})
+            clarification_result["fallback_chain_used"] = True
+            clarification_result["fallback_strategy"] = "consensus"
+            clarification_result["all_attempts"] = all_results
+            clarification_result["consensus"] = "none"
+            return clarification_result
+        
+        # Determine consensus
+        if goal_votes:
+            # Sort by votes (descending)
+            sorted_goals = sorted(goal_votes.items(), key=lambda x: x[1], reverse=True)
+            winning_goal = sorted_goals[0][0]
+            winning_votes = sorted_goals[0][1]
+            total_votes = sum(goal_votes.values())
+            
+            # Check for unanimous consensus
+            if len(goal_votes) == 1:
+                consensus_level = "unanimous"
+                logger.info(f"✅ UNANIMOUS CONSENSUS: All methods agree on '{winning_goal}'")
+            # Check for strong consensus (>75%)
+            elif winning_votes / total_votes >= 0.75:
+                consensus_level = "strong"
+                logger.info(f"✅ STRONG CONSENSUS: {winning_votes}/{total_votes} votes for '{winning_goal}'")
+            # Check for majority (>50%)
+            elif winning_votes / total_votes > 0.50:
+                consensus_level = "majority"
+                logger.info(f"⚠️ MAJORITY CONSENSUS: {winning_votes}/{total_votes} votes for '{winning_goal}'")
+            else:
+                consensus_level = "weak"
+                logger.warning(f"⚠️ WEAK CONSENSUS: {winning_votes}/{total_votes} votes for '{winning_goal}'")
+            
+            # Find the result with winning goal and highest confidence
+            winning_results = [r for r in successful_results if r["goal"] == winning_goal]
+            best_result = max(winning_results, key=lambda x: x["confidence"])
+            
+            # Build final result
+            final_result = best_result["result"].copy()
+            
+            # Add consensus metadata
+            final_result["fallback_chain_used"] = True
+            final_result["fallback_strategy"] = "consensus"
+            final_result["consensus_level"] = consensus_level
+            final_result["winning_goal"] = winning_goal
+            final_result["vote_count"] = winning_votes
+            final_result["total_votes"] = total_votes
+            final_result["all_attempts"] = all_results
+            final_result["vote_breakdown"] = dict(sorted_goals)
+            
+            # Adjust confidence based on consensus
+            original_confidence = final_result.get("confidence", 0.0)
+            if consensus_level == "unanimous":
+                final_result["confidence"] = min(original_confidence * 1.2, 1.0)  # Boost 20%
+            elif consensus_level == "strong":
+                final_result["confidence"] = min(original_confidence * 1.1, 1.0)  # Boost 10%
+            elif consensus_level == "majority":
+                final_result["confidence"] = original_confidence  # No change
+            else:  # weak
+                final_result["confidence"] = original_confidence * 0.9  # Reduce 10%
+            
+            logger.info(f"🎯 FINAL DECISION: {winning_goal} (confidence: {final_result['confidence']:.2f}, consensus: {consensus_level})")
+            
+            # If consensus is weak, add a warning
+            if consensus_level == "weak":
+                final_result["consensus_warning"] = f"Methods disagree. Other options: {[g for g, v in sorted_goals[1:]]}"
+            
+            return final_result
+        
+        # Fallback: This shouldn't happen, but handle it
+        logger.error("❌ Unexpected: No votes collected despite successful results")
+        return self._create_clarification_request(user_prompt, {})
     
     def _rule_based_extraction(
         self,
@@ -195,10 +545,15 @@ class ContextExtractor:
             goal = max(goal_scores.items(), key=lambda x: x[1])[0]
         
         # Check if confidence is too low (ambiguous goal)
-        confidence = min(goal_scores.get(goal, 0) / 3.0, 1.0) if goal_scores else 0.0
+        # Confidence calculation: normalize score, but give benefit if ANY match exists
+        if goal_scores:
+            max_score = goal_scores[goal]
+            confidence = min(max_score / 2.0, 1.0)  # Changed from 3.0 to 2.0 for better sensitivity
+        else:
+            confidence = 0.0
         
         # If goal is unknown or confidence is very low, request clarification
-        if goal == "unknown" or confidence < 0.3:
+        if goal == "unknown" or confidence < 0.25:  # Lowered threshold from 0.3 to 0.25
             return self._create_clarification_request(user_prompt, goal_scores)
         
         # Extract constraints
@@ -229,40 +584,46 @@ class ContextExtractor:
     def _check_ambiguity(self, user_prompt: str, prompt_lower: str) -> Optional[Dict[str, Any]]:
         """Check if the prompt is too ambiguous or vague"""
         
+        # First, check if there's a clear goal match (HIGHEST PRIORITY)
+        has_clear_goal = False
+        matched_goal = None
+        
+        for goal, patterns in self.goal_patterns.items():
+            for pattern in patterns:
+                # Check for pattern match in prompt
+                if pattern in prompt_lower:
+                    has_clear_goal = True
+                    matched_goal = goal
+                    break
+            if has_clear_goal:
+                break
+        
+        # If we have a clear goal match, don't ask for clarification
+        if has_clear_goal:
+            return None
+        
         # List of ambiguous/vague single words that need clarification
         single_word_ambiguous = [
             "detect", "detection", "analyze", "analysis", "process", "run", "execute",
             "test", "check", "help"
         ]
         
-        # Check if prompt is just a single ambiguous word
+        # Check if prompt is just a single ambiguous word (without context)
         prompt_words = prompt_lower.strip().split()
         if len(prompt_words) == 1 and prompt_words[0] in single_word_ambiguous:
             return self._create_clarification_request(user_prompt, {})
         
-        # Check for vague 2-3 word phrases
+        # Check for vague 2-3 word phrases WITHOUT specific keywords
         if len(prompt_words) <= 3:
             vague_phrases = [
                 "do detection", "do analysis", "run analysis", "do something",
-                "check data", "analyze data", "process data"
+                "check data", "process data"
             ]
             if prompt_lower.strip() in vague_phrases:
                 return self._create_clarification_request(user_prompt, {})
         
-        # Check if there's any COMPLETE goal pattern match
-        # (not just partial word match)
-        has_clear_goal = False
-        for goal_patterns in self.goal_patterns.values():
-            for pattern in goal_patterns:
-                # Check for whole phrase matches
-                if pattern in prompt_lower:
-                    has_clear_goal = True
-                    break
-            if has_clear_goal:
-                break
-        
-        # If prompt is short and has no clear goal, request clarification
-        if not has_clear_goal and len(user_prompt.strip()) < 30:
+        # If prompt is very short (< 15 chars) and has no clear goal, request clarification
+        if len(user_prompt.strip()) < 15:
             return self._create_clarification_request(user_prompt, {})
         
         return None
@@ -373,11 +734,245 @@ class ContextExtractor:
         user_prompt: str,
         data_info: Optional[Dict[str, Any]]
     ) -> Dict[str, Any]:
-        """ML-based extraction (placeholder for actual ML model)"""
-        # TODO: Implement ML model (BERT, NER, etc.)
+        """
+        ML-based extraction using traditional ML models
+        
+        This can use:
+        - BERT for intent classification
+        - NER (Named Entity Recognition) for parameter extraction
+        - Text classification models for goal detection
+        
+        Currently falls back to rule-based with enhanced confidence scoring
+        """
+        logger.info("Using ML-based extraction (currently rule-based fallback)")
+        
+        # In production, this would:
+        # 1. Tokenize the prompt
+        # 2. Pass through BERT/transformer model
+        # 3. Classify intent (goal)
+        # 4. Extract entities (parameters, constraints)
+        # 5. Return structured output
+        
+        # For now, use rule-based with adjusted confidence
         result = self._rule_based_extraction(user_prompt, data_info)
         result["extraction_method"] = "ml_fallback"
+        
+        # Future enhancement: Load and use actual ML model
+        # model = load_intent_classifier()
+        # goal_probs = model.predict(user_prompt)
+        # result["goal"] = max(goal_probs, key=goal_probs.get)
+        # result["confidence"] = goal_probs[result["goal"]]
+        
         return result
+    
+    def _llm_extraction(
+        self,
+        user_prompt: str,
+        data_info: Optional[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """
+        LLM-powered extraction using GPT/Claude/Llama
+        
+        Uses a language model to understand natural language intent
+        and extract structured metadata with high accuracy.
+        """
+        logger.info("Using LLM-based extraction")
+        
+        # Check if LLM API is configured
+        llm_api_key = os.getenv("OPENAI_API_KEY") or os.getenv("LLM_API_KEY")
+        llm_provider = os.getenv("LLM_PROVIDER", "openai")  # openai, anthropic, local
+        
+        if not llm_api_key and llm_provider != "local":
+            logger.warning("No LLM API key found, falling back to rule-based extraction")
+            result = self._rule_based_extraction(user_prompt, data_info)
+            result["extraction_method"] = "llm_fallback_no_api_key"
+            return result
+        
+        # Build LLM prompt for intent extraction
+        system_prompt = self._build_llm_system_prompt()
+        user_message = self._build_llm_user_message(user_prompt, data_info)
+        
+        try:
+            # Call LLM API
+            if llm_provider == "openai":
+                llm_response = self._call_openai_llm(system_prompt, user_message)
+            elif llm_provider == "anthropic":
+                llm_response = self._call_anthropic_llm(system_prompt, user_message)
+            elif llm_provider == "local":
+                llm_response = self._call_local_llm(system_prompt, user_message)
+            else:
+                raise ValueError(f"Unsupported LLM provider: {llm_provider}")
+            
+            # Parse LLM response to structured format
+            result = self._parse_llm_response(llm_response, user_prompt)
+            result["extraction_method"] = f"llm_{llm_provider}"
+            
+            logger.info(f"LLM extraction successful: goal={result.get('goal')}, confidence={result.get('confidence')}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"LLM extraction failed: {e}, falling back to rule-based")
+            result = self._rule_based_extraction(user_prompt, data_info)
+            result["extraction_method"] = "llm_fallback_error"
+            return result
+    
+    def _build_llm_system_prompt(self) -> str:
+        """Build system prompt for LLM intent extraction"""
+        available_goals = list(self.goal_patterns.keys())
+        
+        return f"""You are an expert data analysis intent extraction system. Your task is to understand user requests and extract structured metadata.
+
+Available Analysis Goals:
+{json.dumps(available_goals, indent=2)}
+
+Your response must be valid JSON with this exact structure:
+{{
+  "goal": "one of the available goals or 'unknown'",
+  "confidence": 0.0-1.0,
+  "data_type": "tabular|timeseries|geospatial|categorical|text|image|graph",
+  "constraints": {{
+    "threshold": number (optional),
+    "max_limit": number (optional),
+    "min_limit": number (optional)
+  }},
+  "parameters": {{
+    "metric": "string (optional)",
+    "window": "string (optional)",
+    "algorithm": "string (optional)"
+  }},
+  "ambiguous": true|false,
+  "reasoning": "brief explanation of your interpretation"
+}}
+
+If the request is too vague or ambiguous, set "ambiguous": true and "confidence": 0.0.
+
+Examples:
+- "Find anomalies in speed data" → goal: "anomaly_detection", data_type: "timeseries"
+- "Cluster customers by behavior" → goal: "clustering", data_type: "tabular"
+- "Predict future sales" → goal: "timeseries_forecasting", data_type: "timeseries"
+- "Compare A vs B" → goal: "stats_comparison", data_type: "categorical"
+- "do detection" → ambiguous: true (too vague)"""
+    
+    def _build_llm_user_message(self, user_prompt: str, data_info: Optional[Dict[str, Any]]) -> str:
+        """Build user message for LLM"""
+        message = f"User Request: {user_prompt}\n\n"
+        
+        if data_info:
+            message += f"Data Context:\n"
+            message += f"- Rows: {data_info.get('row_count', 'unknown')}\n"
+            message += f"- Columns: {', '.join(data_info.get('columns', []))}\n\n"
+        
+        message += "Extract the intent and return JSON."
+        return message
+    
+    def _call_openai_llm(self, system_prompt: str, user_message: str) -> str:
+        """Call OpenAI API (GPT-4, GPT-3.5, etc.)"""
+        try:
+            import openai
+            openai.api_key = os.getenv("OPENAI_API_KEY")
+            
+            response = openai.ChatCompletion.create(
+                model=os.getenv("OPENAI_MODEL", "gpt-4"),
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message}
+                ],
+                temperature=0.1,  # Low temperature for consistent extraction
+                max_tokens=500
+            )
+            
+            return response.choices[0].message.content
+        except ImportError:
+            logger.error("openai package not installed. Install with: pip install openai")
+            raise
+        except Exception as e:
+            logger.error(f"OpenAI API call failed: {e}")
+            raise
+    
+    def _call_anthropic_llm(self, system_prompt: str, user_message: str) -> str:
+        """Call Anthropic Claude API"""
+        try:
+            import anthropic
+            client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+            
+            response = client.messages.create(
+                model=os.getenv("ANTHROPIC_MODEL", "claude-3-sonnet-20240229"),
+                max_tokens=500,
+                system=system_prompt,
+                messages=[
+                    {"role": "user", "content": user_message}
+                ]
+            )
+            
+            return response.content[0].text
+        except ImportError:
+            logger.error("anthropic package not installed. Install with: pip install anthropic")
+            raise
+        except Exception as e:
+            logger.error(f"Anthropic API call failed: {e}")
+            raise
+    
+    def _call_local_llm(self, system_prompt: str, user_message: str) -> str:
+        """Call local LLM (Ollama, llama.cpp, etc.)"""
+        try:
+            import requests
+            
+            # Assumes Ollama or similar running locally
+            url = os.getenv("LOCAL_LLM_URL", "http://localhost:11434/api/generate")
+            model = os.getenv("LOCAL_LLM_MODEL", "llama2")
+            
+            payload = {
+                "model": model,
+                "prompt": f"{system_prompt}\n\n{user_message}",
+                "stream": False
+            }
+            
+            response = requests.post(url, json=payload, timeout=30)
+            response.raise_for_status()
+            
+            return response.json().get("response", "")
+        except Exception as e:
+            logger.error(f"Local LLM call failed: {e}")
+            raise
+    
+    def _parse_llm_response(self, llm_response: str, user_prompt: str) -> Dict[str, Any]:
+        """Parse LLM JSON response into structured format"""
+        try:
+            # Extract JSON from response (may have markdown code blocks)
+            json_str = llm_response.strip()
+            if "```json" in json_str:
+                json_str = json_str.split("```json")[1].split("```")[0]
+            elif "```" in json_str:
+                json_str = json_str.split("```")[1].split("```")[0]
+            
+            llm_data = json.loads(json_str)
+            
+            # Check if LLM detected ambiguity
+            if llm_data.get("ambiguous") or llm_data.get("confidence", 0) < 0.3:
+                return self._create_clarification_request(user_prompt, {})
+            
+            # Convert to our standard format
+            result = {
+                "goal": llm_data.get("goal", "unknown"),
+                "confidence": llm_data.get("confidence", 0.5),
+                "data_type": llm_data.get("data_type", "tabular"),
+                "constraints": llm_data.get("constraints", {}),
+                "parameters": llm_data.get("parameters", {}),
+                "data_characteristics": {},
+                "user_preferences": {},
+                "extraction_method": "llm",
+                "llm_reasoning": llm_data.get("reasoning", "")
+            }
+            
+            return result
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse LLM JSON response: {e}")
+            logger.debug(f"LLM response was: {llm_response}")
+            raise
+        except Exception as e:
+            logger.error(f"Error parsing LLM response: {e}")
+            raise
     
     def _hybrid_extraction(
         self,

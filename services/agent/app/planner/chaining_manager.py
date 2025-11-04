@@ -260,16 +260,18 @@ class MCPToolsChainingManager:
                 })
         
         # Conflict 2: Missing required parameters
+        # NOTE: We don't check for missing 'metric' here because:
+        # 1. Metric is typically provided via form input (req.params), not extracted from prompt
+        # 2. The invocation layer will use req.params which merges form inputs
+        # 3. False positive conflicts confuse users when everything is actually fine
         goal = metadata.get("goal")
         parameters = metadata.get("parameters", {})
         
-        if goal == "anomaly_detection" and "metric" not in parameters:
-            conflicts.append({
-                "type": "missing_parameter",
-                "parameter": "metric",
-                "message": "Metric column not specified for anomaly detection",
-                "severity": "medium"
-            })
+        # Only check for parameters that MUST come from the prompt text
+        # (not form inputs like metric, timestamp_field, key_fields)
+        if goal == "clustering" and "n_clusters" not in parameters:
+            # n_clusters should be in prompt or will use default
+            pass  # This is actually OK, we have defaults
         
         # Conflict 3: Data type mismatch
         data_type = metadata.get("data_type")

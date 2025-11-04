@@ -182,15 +182,18 @@ class MCPToolsInvocationLayer:
         params = tool_spec.get("params", {})
         timeout = tool_spec.get("timeout", 30)
         
-        logger.info(f"Invoking tool: {tool_id} at {endpoint}")
+        logger.info(f"🔧 Invoking tool: {tool_id}")
+        logger.info(f"   └─ Endpoint: {endpoint}")
+        logger.info(f"   └─ Parameters: {list(params.keys()) if params else 'None'}")
+        logger.info(f"   └─ Timeout: {timeout}s")
         
         # Check if tool is available
         if not endpoint:
-            logger.error(f"Tool {tool_id} has no endpoint")
+            logger.error(f"❌ Tool {tool_id} has no endpoint configured")
             return ToolInvocationResult(
                 tool_id=tool_id,
                 status="unavailable",
-                error=f"Tool {tool_id} endpoint not found"
+                error=f"Tool {tool_id} endpoint not found in registry"
             )
         
         # Build payload
@@ -199,6 +202,10 @@ class MCPToolsInvocationLayer:
             "params": {**request_data.get("params", {}), **params},
             "context": request_data.get("context", {})
         }
+        
+        # Log payload summary
+        input_rows = len(payload["input"].get("rows", []))
+        logger.info(f"   └─ Input: {input_rows} rows")
         
         # Sign with HMAC
         body = json.dumps(payload).encode("utf-8")
@@ -210,7 +217,9 @@ class MCPToolsInvocationLayer:
         
         for attempt in range(retry_count + 1):
             try:
-                logger.debug(f"Tool {tool_id} attempt {attempt + 1}/{retry_count + 1}")
+                if attempt > 0:
+                    logger.info(f"   └─ Retry attempt {attempt}/{retry_count}")
+                
                 response = requests.post(
                     endpoint,
                     json=payload,
@@ -220,7 +229,14 @@ class MCPToolsInvocationLayer:
                 response.raise_for_status()
                 
                 result_data = response.json()
-                logger.info(f"Tool {tool_id} succeeded")
+                
+                # Log success with details
+                logger.info(f"✅ Tool {tool_id} completed successfully")
+                
+                # Extract and log summary
+                if isinstance(result_data, dict) and "output" in result_data:
+                    output_summary = self._log_output_summary(tool_id, result_data["output"])
+                    logger.info(f"   └─ {output_summary}")
                 
                 return ToolInvocationResult(
                     tool_id=tool_id,
@@ -229,29 +245,60 @@ class MCPToolsInvocationLayer:
                 )
             
             except requests.exceptions.Timeout:
-                last_error = f"Tool {tool_id} timed out after {timeout}s"
-                logger.warning(last_error)
+                last_error = f"Request timed out after {timeout}s"
+                logger.warning(f"⚠️ Tool {tool_id}: {last_error}")
             
             except requests.exceptions.ConnectionError:
-                last_error = f"Tool {tool_id} connection failed"
-                logger.warning(last_error)
+                last_error = f"Connection failed - tool service may be down"
+                logger.warning(f"⚠️ Tool {tool_id}: {last_error}")
             
             except requests.exceptions.HTTPError as e:
-                last_error = f"Tool {tool_id} returned error: {e.response.status_code}"
-                logger.error(last_error)
+                last_error = f"HTTP {e.response.status_code}: {e.response.text[:200]}"
+                logger.error(f"❌ Tool {tool_id}: {last_error}")
                 break  # Don't retry HTTP errors
             
             except Exception as e:
-                last_error = f"Tool {tool_id} failed: {str(e)}"
-                logger.error(last_error)
+                last_error = f"Unexpected error: {str(e)}"
+                logger.error(f"❌ Tool {tool_id}: {last_error}")
                 break
         
         # All retries failed
+        logger.error(f"❌ Tool {tool_id} failed after {retry_count + 1} attempts")
         return ToolInvocationResult(
             tool_id=tool_id,
             status="error",
             error=last_error
         )
+    
+    def _log_output_summary(self, tool_id: str, output: Dict[str, Any]) -> str:
+        """Generate a one-line summary of tool output for logging"""
+        if not isinstance(output, dict):
+            return f"Output: {str(output)[:100]}"
+        
+        # Tool-specific summaries
+        if "anomalies_detected" in output:
+            count = output["anomalies_detected"]
+            return f"Found {count} anomalies"
+        
+        elif "forecast" in output:
+            periods = len(output["forecast"])
+            return f"Generated {periods} period forecast"
+        
+        elif "predictions" in output:
+            count = len(output["predictions"])
+            acc = output.get("accuracy", "N/A")
+            return f"Generated {count} predictions (accuracy: {acc})"
+        
+        elif "clusters" in output:
+            num = output["clusters"]
+            return f"Created {num} clusters"
+        
+        elif "rows_processed" in output:
+            rows = output["rows_processed"]
+            return f"Processed {rows} rows"
+        
+        else:
+            return f"Execution completed"
     
     def _merge_with_previous_output(
         self,
@@ -296,23 +343,39 @@ class MCPToolsInvocationLayer:
         else:
             status = "failed"
         
+        # Build detailed results with user-friendly messages
+        detailed_results = []
+        for r in results:
+            tool_info = {
+                "tool_id": r.tool_id,
+                "tool_name": self._get_tool_display_name(r.tool_id),
+                "status": r.status,
+                "status_message": self._get_status_message(r),
+                "output": r.output,
+                "error": r.error
+            }
+            
+            # Add execution details for successful tools
+            if r.status == "success" and r.output:
+                tool_info["execution_summary"] = self._extract_execution_summary(r.output)
+            
+            detailed_results.append(tool_info)
+        
         # Build response
         response = {
             "status": status,
-            "results": [
-                {
-                    "tool_id": r.tool_id,
-                    "status": r.status,
-                    "output": r.output,
-                    "error": r.error
-                }
-                for r in results
-            ],
+            "status_message": self._get_overall_status_message(status, success_count, len(results)),
+            "results": detailed_results,
             "summary": {
                 "total_tools": len(results),
                 "successful": success_count,
                 "failed": error_count,
-                "unavailable": unavailable_count
+                "unavailable": unavailable_count,
+                "execution_details": [
+                    f"✅ {r.tool_id}: Success" if r.status == "success"
+                    else f"❌ {r.tool_id}: {r.status.title()} - {r.error if r.error else 'Unknown error'}"
+                    for r in results
+                ]
             }
         }
         
@@ -325,6 +388,81 @@ class MCPToolsInvocationLayer:
         logger.info(f"Execution completed: {status} ({success_count}/{len(results)} succeeded)")
         
         return response
+    
+    def _get_tool_display_name(self, tool_id: str) -> str:
+        """Get user-friendly display name for tool"""
+        display_names = {
+            "anomaly_zscore": "Anomaly Detection (Z-Score)",
+            "timeseries_forecaster": "Time Series Forecaster",
+            "classifier_regressor": "Classifier & Regressor",
+            "cluster_feature_engineer": "Clustering & Feature Engineering",
+            "geospatial_mapper": "Geospatial Mapper",
+            "incident_detector": "Incident Detector",
+            "stats_comparator": "Statistical Comparator"
+        }
+        return display_names.get(tool_id, tool_id.replace("_", " ").title())
+    
+    def _get_status_message(self, result: ToolInvocationResult) -> str:
+        """Get user-friendly status message"""
+        if result.status == "success":
+            return "✅ Execution successful"
+        elif result.status == "error":
+            return f"❌ Execution failed: {result.error}"
+        elif result.status == "unavailable":
+            return f"⚠️ Tool unavailable: {result.error}"
+        else:
+            return f"ℹ️ Status: {result.status}"
+    
+    def _get_overall_status_message(self, status: str, success_count: int, total: int) -> str:
+        """Get user-friendly overall status message"""
+        if status == "success":
+            return f"✅ All {total} tool(s) executed successfully"
+        elif status == "partial_success":
+            return f"⚠️ Partial success: {success_count}/{total} tool(s) succeeded"
+        elif status == "needs_feedback":
+            return "❓ User feedback required - some tools are unavailable"
+        else:
+            return f"❌ Execution failed: {total - success_count}/{total} tool(s) failed"
+    
+    def _extract_execution_summary(self, output: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract key information from tool output for display"""
+        if not isinstance(output, dict):
+            return {"raw_output": str(output)}
+        
+        summary = {}
+        
+        # Extract common fields
+        if "output" in output:
+            tool_output = output["output"]
+            
+            # Anomaly detection specific
+            if "anomalies_detected" in tool_output:
+                summary["anomalies_detected"] = tool_output["anomalies_detected"]
+                summary["anomaly_indices"] = tool_output.get("anomaly_indices", [])[:5]  # First 5
+            
+            # Forecasting specific
+            if "forecast" in tool_output:
+                summary["forecast_periods"] = len(tool_output["forecast"])
+                summary["forecast_values"] = tool_output["forecast"][:5]  # First 5
+            
+            # Classification specific
+            if "predictions" in tool_output:
+                summary["predictions_count"] = len(tool_output["predictions"])
+                summary["accuracy"] = tool_output.get("accuracy")
+            
+            # Clustering specific
+            if "clusters" in tool_output:
+                summary["num_clusters"] = tool_output["clusters"]
+                summary["cluster_sizes"] = tool_output.get("cluster_sizes", [])
+            
+            # Generic fields
+            if "rows_processed" in tool_output:
+                summary["rows_processed"] = tool_output["rows_processed"]
+            
+            if "execution_time" in tool_output:
+                summary["execution_time"] = tool_output["execution_time"]
+        
+        return summary if summary else {"message": "Execution completed successfully"}
     
     def _request_user_feedback(
         self,
