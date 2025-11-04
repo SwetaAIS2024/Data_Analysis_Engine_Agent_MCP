@@ -178,6 +178,11 @@ class ContextExtractor:
         """Rule-based extraction using keyword matching"""
         prompt_lower = user_prompt.lower()
         
+        # Check for ambiguous/vague prompts first
+        ambiguity_result = self._check_ambiguity(user_prompt, prompt_lower)
+        if ambiguity_result:
+            return ambiguity_result
+        
         # Extract goal
         goal = "unknown"
         goal_scores = {}
@@ -188,6 +193,13 @@ class ContextExtractor:
         
         if goal_scores:
             goal = max(goal_scores.items(), key=lambda x: x[1])[0]
+        
+        # Check if confidence is too low (ambiguous goal)
+        confidence = min(goal_scores.get(goal, 0) / 3.0, 1.0) if goal_scores else 0.0
+        
+        # If goal is unknown or confidence is very low, request clarification
+        if goal == "unknown" or confidence < 0.3:
+            return self._create_clarification_request(user_prompt, goal_scores)
         
         # Extract constraints
         constraints = self._extract_constraints(user_prompt)
@@ -201,7 +213,7 @@ class ContextExtractor:
         # Analyze data characteristics
         data_characteristics = self._analyze_data(data_info)
         
-        return {
+        result = {
             "goal": goal,
             "constraints": constraints,
             "data_type": data_type,
@@ -209,8 +221,130 @@ class ContextExtractor:
             "parameters": parameters,
             "user_preferences": self._extract_preferences(user_prompt),
             "extraction_method": "rule_based",
-            "confidence": min(goal_scores.get(goal, 0) / 3.0, 1.0) if goal_scores else 0.0
+            "confidence": confidence
         }
+        
+        return result
+    
+    def _check_ambiguity(self, user_prompt: str, prompt_lower: str) -> Optional[Dict[str, Any]]:
+        """Check if the prompt is too ambiguous or vague"""
+        
+        # List of ambiguous/vague single words that need clarification
+        single_word_ambiguous = [
+            "detect", "detection", "analyze", "analysis", "process", "run", "execute",
+            "test", "check", "help"
+        ]
+        
+        # Check if prompt is just a single ambiguous word
+        prompt_words = prompt_lower.strip().split()
+        if len(prompt_words) == 1 and prompt_words[0] in single_word_ambiguous:
+            return self._create_clarification_request(user_prompt, {})
+        
+        # Check for vague 2-3 word phrases
+        if len(prompt_words) <= 3:
+            vague_phrases = [
+                "do detection", "do analysis", "run analysis", "do something",
+                "check data", "analyze data", "process data"
+            ]
+            if prompt_lower.strip() in vague_phrases:
+                return self._create_clarification_request(user_prompt, {})
+        
+        # Check if there's any COMPLETE goal pattern match
+        # (not just partial word match)
+        has_clear_goal = False
+        for goal_patterns in self.goal_patterns.values():
+            for pattern in goal_patterns:
+                # Check for whole phrase matches
+                if pattern in prompt_lower:
+                    has_clear_goal = True
+                    break
+            if has_clear_goal:
+                break
+        
+        # If prompt is short and has no clear goal, request clarification
+        if not has_clear_goal and len(user_prompt.strip()) < 30:
+            return self._create_clarification_request(user_prompt, {})
+        
+        return None
+    
+    def _create_clarification_request(
+        self, 
+        user_prompt: str, 
+        goal_scores: Dict[str, int]
+    ) -> Dict[str, Any]:
+        """Create a result that requests user clarification"""
+        
+        # Suggest possible goals based on available tools
+        suggested_goals = []
+        
+        if goal_scores:
+            # If we have some weak matches, suggest them
+            sorted_goals = sorted(goal_scores.items(), key=lambda x: x[1], reverse=True)
+            suggested_goals = [goal for goal, score in sorted_goals[:3]]
+        else:
+            # Otherwise, suggest common goals
+            suggested_goals = [
+                "anomaly_detection",
+                "clustering", 
+                "timeseries_forecasting",
+                "classification",
+                "stats_comparison"
+            ]
+        
+        return {
+            "goal": "clarification_required",
+            "constraints": {
+                "ambiguous_prompt": True,
+                "original_prompt": user_prompt
+            },
+            "data_type": "unknown",
+            "data_characteristics": {},
+            "parameters": {},
+            "user_preferences": {},
+            "extraction_method": "ambiguity_detected",
+            "confidence": 0.0,
+            "requires_clarification": True,
+            "clarification_message": f"Your request '{user_prompt}' is too ambiguous. Please specify what analysis you want to perform.",
+            "suggested_options": [
+                {
+                    "id": goal,
+                    "label": self._get_goal_label(goal),
+                    "description": self._get_goal_description(goal)
+                }
+                for goal in suggested_goals
+            ]
+        }
+    
+    def _get_goal_label(self, goal_id: str) -> str:
+        """Get human-readable label for a goal"""
+        labels = {
+            "anomaly_detection": "Anomaly Detection",
+            "clustering": "Clustering / Segmentation",
+            "timeseries_forecasting": "Time Series Forecasting",
+            "classification": "Classification",
+            "regression": "Regression Analysis",
+            "stats_comparison": "Statistical Comparison",
+            "feature_engineering": "Feature Engineering",
+            "geospatial_analysis": "Geospatial Analysis",
+            "incident_detection": "Incident Detection"
+        }
+        return labels.get(goal_id, goal_id.replace("_", " ").title())
+    
+    def _get_goal_description(self, goal_id: str) -> str:
+        """Get description for a goal"""
+        descriptions = {
+            "anomaly_detection": "Find unusual patterns or outliers in your data",
+            "clustering": "Group similar data points together to discover patterns",
+            "timeseries_forecasting": "Predict future values based on historical trends",
+            "classification": "Categorize data into predefined classes",
+            "regression": "Predict continuous numerical values",
+            "stats_comparison": "Compare groups statistically (A/B testing, etc.)",
+            "feature_engineering": "Create derived features from existing data",
+            "geospatial_analysis": "Analyze spatial patterns and locations",
+            "incident_detection": "Detect incidents like spikes, drops, or anomalies"
+        }
+        return descriptions.get(goal_id, "Perform " + goal_id.replace("_", " "))
+
     
     def _regex_extraction(
         self,
@@ -252,6 +386,11 @@ class ContextExtractor:
     ) -> Dict[str, Any]:
         """Hybrid: Combine rule-based and regex"""
         rule_result = self._rule_based_extraction(user_prompt, data_info)
+        
+        # If rule-based detected clarification needed, return it immediately
+        if rule_result.get("requires_clarification"):
+            return rule_result
+        
         regex_result = self._regex_extraction(user_prompt, data_info)
         
         # Merge results (prefer rule-based for goal, merge parameters)

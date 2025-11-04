@@ -166,6 +166,17 @@ class MCPToolsChainingManager:
         
         selected_tools = []
         
+        # Check if clarification is required - don't select any tools
+        if goal == "clarification_required":
+            logger.warning("Clarification required - no tools will be selected")
+            return []
+        
+        # Check for forced tools (manual mode)
+        if "forced_tools" in constraints:
+            forced = constraints["forced_tools"]
+            logger.info(f"Using manually selected tools: {forced}")
+            return forced
+        
         # Check for composite goals (e.g., "detect anomalies and generate report")
         # Look for keywords that indicate multiple goals
         goal_lower = goal.lower()

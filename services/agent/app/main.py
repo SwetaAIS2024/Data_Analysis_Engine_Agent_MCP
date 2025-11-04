@@ -84,6 +84,42 @@ def analyze_v2(req: AnalyzeRequest):
             data_info=data_info
         )
         
+        # Check if clarification is required
+        if context_result.get("requires_clarification"):
+            logger.warning(f"[REQUEST {request_id}] User clarification required - ambiguous prompt")
+            logger.info(f"[REQUEST {request_id}] Original prompt: {user_prompt}")
+            logger.info(f"[REQUEST {request_id}] Suggested options: {[opt['id'] for opt in context_result.get('suggested_options', [])]}")
+            
+            duration = time.time() - start_time
+            
+            return AnalyzeResponse(
+                request_id=request_id,
+                status="clarification_required",
+                result={
+                    "status": "clarification_required",
+                    "user_feedback": {
+                        "message": context_result.get("clarification_message"),
+                        "type": "clarification",
+                        "options": context_result.get("suggested_options", [])
+                    }
+                },
+                tool_meta={
+                    "pipeline_version": "v2_simplified",
+                    "context_extraction": {
+                        "goal": context_result["goal"],
+                        "confidence": context_result.get("confidence", 0.0),
+                        "ambiguous_prompt": True
+                    },
+                    "duration_seconds": duration
+                }
+            )
+        
+        # Check if forced tools are specified (for manual mode)
+        forced_tools = req.context.get("force_tools")
+        if forced_tools:
+            logger.info(f"[REQUEST {request_id}] Manual tool selection mode - Forced tools: {forced_tools}")
+            context_result["forced_tools"] = forced_tools
+        
         logger.info(f"[REQUEST {request_id}] Context extracted - Goal: {context_result['goal']}")
         logger.info(f"[REQUEST {request_id}] Data type: {context_result['data_type']}")
         logger.info(f"[REQUEST {request_id}] Constraints: {context_result['constraints']}")

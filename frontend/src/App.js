@@ -11,8 +11,29 @@ function App() {
   const [data, setData] = useState([]);
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [task, setTask] = useState("anomaly_detection");
+  
+  // Mode selection: 'prompt' for natural language, 'manual' for tool selection
+  const [mode, setMode] = useState("prompt");
+  
+  // For prompt-based mode
+  const [userPrompt, setUserPrompt] = useState("");
+  
+  // For manual tool selection mode
+  const [selectedTools, setSelectedTools] = useState([]);
   const [dataType, setDataType] = useState("tabular");
+  
+  // Available tools
+  const availableTools = [
+    { id: "anomaly_detection", label: "Anomaly Detection", description: "Detect outliers and anomalies" },
+    { id: "clustering", label: "Clustering", description: "Group similar data points" },
+    { id: "classification", label: "Classification", description: "Predict categorical outcomes" },
+    { id: "regression", label: "Regression", description: "Predict continuous values" },
+    { id: "forecasting", label: "Time Series Forecasting", description: "Predict future values" },
+    { id: "feature_engineering", label: "Feature Engineering", description: "Create derived features" },
+    { id: "stats_comparison", label: "Statistical Comparison", description: "Compare groups statistically" },
+    { id: "incident_detection", label: "Incident Detection", description: "Detect spikes, drops, anomalies" },
+    { id: "geospatial_mapping", label: "Geospatial Mapping", description: "Analyze spatial patterns" }
+  ];
 
   const handleFileChange = (e) => {
     setCsvFile(e.target.files[0]);
@@ -30,19 +51,117 @@ function App() {
     });
   };
 
+  const handleToolToggle = (toolId) => {
+    setSelectedTools(prev => 
+      prev.includes(toolId) 
+        ? prev.filter(id => id !== toolId)
+        : [...prev, toolId]
+    );
+  };
+
   const handleAnalyze = async () => {
     setLoading(true);
+    setResult(null); // Clear previous results
+    
     try {
-      // Debug: print loaded data
       console.log("Loaded CSV data:", data);
       
-      // Build task description for V2 context extraction
-      const taskDescription = `${task.replace('_', ' ')} on ${dataType} data`;
+      let payload;
+      
+      if (mode === "prompt") {
+        // Natural language prompt mode - full V2 pipeline
+        payload = {
+          tenant_id: "dev-tenant",
+          context: { 
+            task: userPrompt,
+            data_type: dataType 
+          },
+          data_pointer: {
+            uri: "sample://in-memory",
+            format: "inline",
+            rows: data,
+          },
+          params: {
+            metric: "speed_kmh",
+            key_fields: ["segment_id", "sensor_id"],
+            timestamp_field: "timestamp",
+            threshold: 2.0,
+            rolling_window: "2min",
+            min_points: 2,
+          },
+        };
+      } else {
+        // Manual tool selection mode
+        if (selectedTools.length === 0) {
+          alert("Please select at least one tool");
+          setLoading(false);
+          return;
+        }
+        
+        // Build task description from selected tools
+        const taskDescription = selectedTools.map(toolId => {
+          const tool = availableTools.find(t => t.id === toolId);
+          return tool ? tool.label : toolId;
+        }).join(", ");
+        
+        payload = {
+          tenant_id: "dev-tenant",
+          context: { 
+            task: `Perform ${taskDescription} on ${dataType} data`,
+            data_type: dataType,
+            force_tools: selectedTools // Force specific tools to be used
+          },
+          data_pointer: {
+            uri: "sample://in-memory",
+            format: "inline",
+            rows: data,
+          },
+          params: {
+            metric: "speed_kmh",
+            key_fields: ["segment_id", "sensor_id"],
+            timestamp_field: "timestamp",
+            threshold: 2.0,
+            rolling_window: "2min",
+            min_points: 2,
+          },
+        };
+      }
+      
+      console.log("Sending V2 request:", payload);
+      const res = await axios.post("http://localhost:8080/v2/analyze", payload);
+      console.log("V2 response:", res.data);
+      console.log("Response status:", res.data.status);
+      console.log("Response result:", res.data.result);
+      console.log("User feedback:", res.data.result?.user_feedback);
+      
+      setResult(res.data);
+      setLoading(false);
+    } catch (err) {
+      setLoading(false);
+      console.error("Analysis error:", err);
+      alert("Error: " + (err.response?.data?.detail || err.message));
+    }
+  };
+
+  const handleClarificationSelection = async (selectedGoal) => {
+    // User selected a clarification option, re-run with specific goal
+    setLoading(true);
+    
+    try {
+      const goalLabels = {
+        "anomaly_detection": "Find anomalies and outliers in the data",
+        "clustering": "Cluster and group similar data points",
+        "timeseries_forecasting": "Forecast future values based on trends",
+        "classification": "Classify data into categories",
+        "stats_comparison": "Perform statistical comparison of groups"
+      };
+      
+      const clarifiedPrompt = goalLabels[selectedGoal] || selectedGoal.replace("_", " ");
       
       const payload = {
         tenant_id: "dev-tenant",
         context: { 
-          task: taskDescription,
+          task: clarifiedPrompt,
           data_type: dataType 
         },
         data_pointer: {
@@ -60,15 +179,9 @@ function App() {
         },
       };
       
-      console.log("Sending V2 request:", payload);
+      console.log("Sending clarified request:", payload);
       const res = await axios.post("http://localhost:8080/v2/analyze", payload);
       console.log("V2 response:", res.data);
-      
-      // Handle V2 response format
-      if (res.data.result && res.data.result.user_feedback) {
-        // User feedback required
-        alert("User feedback required: " + JSON.stringify(res.data.result.user_feedback, null, 2));
-      }
       
       setResult(res.data);
       setLoading(false);
@@ -371,34 +484,237 @@ function App() {
   }, [result, data, renderAnomalyChart, renderClusterChart, renderForecastChart]);
 
   return (
-    <div style={{ padding: "2rem" }}>
-      <h2>Data Analysis Engine Agent - V2</h2>
+    <div style={{ padding: "2rem", maxWidth: "1400px", margin: "0 auto" }}>
+      <h2>🚀 Data Analysis Engine Agent </h2>
       <p style={{ color: "#666", marginBottom: "1.5rem" }}>
-        Simplified pipeline with context extraction, chaining manager, and tool invocation
+        Complete AI-powered data analysis pipeline with context extraction, intelligent tool selection, and visualization
       </p>
-      <div style={{ marginBottom: "1rem" }}>
-        <label>Task:&nbsp;</label>
-        <select value={task} onChange={e => setTask(e.target.value)}>
-          <option value="anomaly_detection">Anomaly Detection</option>
-          <option value="clustering">Clustering</option>
-          <option value="feature_engineering">Feature Engineering</option>
-          <option value="classification">Classification</option>
-          <option value="forecasting">Forecasting</option>
-          <option value="stats_comparison">Stats Comparison</option>
-        </select>
-        &nbsp;&nbsp;
-        <label>Dataset Type:&nbsp;</label>
-        <select value={dataType} onChange={e => setDataType(e.target.value)}>
-          <option value="tabular">Tabular</option>
-          <option value="timeseries">Timeseries</option>
-          <option value="geospatial">Geospatial</option>
-          <option value="categorical">Categorical</option>
-        </select>
+      
+      {/* Mode Selection */}
+      <div style={{ 
+        marginBottom: "2rem", 
+        padding: "1.5rem", 
+        backgroundColor: "#f5f5f5", 
+        borderRadius: "8px",
+        border: "2px solid #ddd"
+      }}>
+        <h3 style={{ marginTop: 0 }}>Analysis Mode</h3>
+        <div style={{ display: "flex", gap: "1rem", marginBottom: "1rem" }}>
+          <label style={{ 
+            flex: 1, 
+            padding: "1rem", 
+            backgroundColor: mode === "prompt" ? "#2196f3" : "white",
+            color: mode === "prompt" ? "white" : "black",
+            border: "2px solid #2196f3",
+            borderRadius: "6px",
+            cursor: "pointer",
+            textAlign: "center",
+            fontWeight: "bold",
+            transition: "all 0.3s"
+          }}>
+            <input 
+              type="radio" 
+              value="prompt" 
+              checked={mode === "prompt"}
+              onChange={(e) => setMode(e.target.value)}
+              style={{ marginRight: "0.5rem" }}
+            />
+            🤖 Natural Language (AI-Powered)
+            <div style={{ fontSize: "0.85em", fontWeight: "normal", marginTop: "0.25rem" }}>
+              Describe your analysis goal in plain English
+            </div>
+          </label>
+          
+          <label style={{ 
+            flex: 1, 
+            padding: "1rem", 
+            backgroundColor: mode === "manual" ? "#2196f3" : "white",
+            color: mode === "manual" ? "white" : "black",
+            border: "2px solid #2196f3",
+            borderRadius: "6px",
+            cursor: "pointer",
+            textAlign: "center",
+            fontWeight: "bold",
+            transition: "all 0.3s"
+          }}>
+            <input 
+              type="radio" 
+              value="manual" 
+              checked={mode === "manual"}
+              onChange={(e) => setMode(e.target.value)}
+              style={{ marginRight: "0.5rem" }}
+            />
+            🔧 Manual Tool Selection
+            <div style={{ fontSize: "0.85em", fontWeight: "normal", marginTop: "0.25rem" }}>
+              Choose specific analysis tools to apply
+            </div>
+          </label>
+        </div>
+        
+        {/* Dataset Type - Common to both modes */}
+        <div style={{ marginBottom: "1rem" }}>
+          <label style={{ fontWeight: "bold", marginRight: "0.5rem" }}>Dataset Type:</label>
+          <select 
+            value={dataType} 
+            onChange={e => setDataType(e.target.value)}
+            style={{ 
+              padding: "0.5rem", 
+              borderRadius: "4px", 
+              border: "1px solid #ccc",
+              fontSize: "1em"
+            }}
+          >
+            <option value="tabular">Tabular</option>
+            <option value="timeseries">Time Series</option>
+            <option value="geospatial">Geospatial</option>
+            <option value="categorical">Categorical</option>
+          </select>
+        </div>
+        
+        {/* Prompt Input for Natural Language Mode */}
+        {mode === "prompt" && (
+          <div>
+            <label style={{ fontWeight: "bold", display: "block", marginBottom: "0.5rem" }}>
+              💬 Describe your analysis goal:
+            </label>
+            <textarea
+              value={userPrompt}
+              onChange={(e) => setUserPrompt(e.target.value)}
+              placeholder="Example: Find anomalies in the speed data and cluster them by pattern. Also forecast the next hour's values."
+              style={{
+                width: "100%",
+                minHeight: "100px",
+                padding: "0.75rem",
+                borderRadius: "4px",
+                border: "1px solid #ccc",
+                fontSize: "1em",
+                fontFamily: "inherit",
+                resize: "vertical"
+              }}
+            />
+            <div style={{ fontSize: "0.85em", color: "#666", marginTop: "0.5rem" }}>
+              💡 Tip: Be specific about what you want to analyze. The AI will automatically select and chain the appropriate tools.
+            </div>
+          </div>
+        )}
+        
+        {/* Tool Selection for Manual Mode */}
+        {mode === "manual" && (
+          <div>
+            <label style={{ fontWeight: "bold", display: "block", marginBottom: "0.75rem" }}>
+              🔧 Select Tools to Apply:
+            </label>
+            <div style={{ 
+              display: "grid", 
+              gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+              gap: "0.75rem"
+            }}>
+              {availableTools.map(tool => (
+                <label 
+                  key={tool.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    padding: "0.75rem",
+                    backgroundColor: selectedTools.includes(tool.id) ? "#e3f2fd" : "white",
+                    border: `2px solid ${selectedTools.includes(tool.id) ? "#2196f3" : "#ddd"}`,
+                    borderRadius: "6px",
+                    cursor: "pointer",
+                    transition: "all 0.2s"
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedTools.includes(tool.id)}
+                    onChange={() => handleToolToggle(tool.id)}
+                    style={{ marginRight: "0.5rem", marginTop: "0.2rem" }}
+                  />
+                  <div>
+                    <div style={{ fontWeight: "bold", marginBottom: "0.25rem" }}>
+                      {tool.label}
+                    </div>
+                    <div style={{ fontSize: "0.85em", color: "#666" }}>
+                      {tool.description}
+                    </div>
+                  </div>
+                </label>
+              ))}
+            </div>
+            <div style={{ fontSize: "0.85em", color: "#666", marginTop: "0.75rem" }}>
+              ✅ Selected: <strong>{selectedTools.length}</strong> tool(s)
+            </div>
+          </div>
+        )}
       </div>
-      <input type="file" accept=".csv" onChange={handleFileChange} />
-      <button onClick={handleUpload} style={{ marginLeft: "1rem" }}>Preview CSV</button>
-      <button onClick={handleAnalyze} style={{ marginLeft: "1rem" }} disabled={loading || !data.length}>Run Analysis</button>
-      {loading && <div>Loading...</div>}
+      
+      {/* File Upload Section */}
+      <div style={{ 
+        marginBottom: "2rem", 
+        padding: "1.5rem", 
+        backgroundColor: "#fff", 
+        borderRadius: "8px",
+        border: "2px solid #ddd"
+      }}>
+        <h3 style={{ marginTop: 0 }}>📁 Data Upload</h3>
+        <div style={{ display: "flex", gap: "1rem", alignItems: "center" }}>
+          <input 
+            type="file" 
+            accept=".csv" 
+            onChange={handleFileChange}
+            style={{ flex: 1 }}
+          />
+          <button 
+            onClick={handleUpload}
+            disabled={!csvFile}
+            style={{
+              padding: "0.75rem 1.5rem",
+              backgroundColor: csvFile ? "#2196f3" : "#ccc",
+              color: "white",
+              border: "none",
+              borderRadius: "4px",
+              cursor: csvFile ? "pointer" : "not-allowed",
+              fontWeight: "bold",
+              fontSize: "1em"
+            }}
+          >
+            📊 Load CSV
+          </button>
+          <button 
+            onClick={handleAnalyze}
+            disabled={loading || !data.length || (mode === "prompt" && !userPrompt.trim()) || (mode === "manual" && selectedTools.length === 0)}
+            style={{
+              padding: "0.75rem 1.5rem",
+              backgroundColor: (loading || !data.length || (mode === "prompt" && !userPrompt.trim()) || (mode === "manual" && selectedTools.length === 0)) ? "#ccc" : "#4caf50",
+              color: "white",
+              border: "none",
+              borderRadius: "4px",
+              cursor: (loading || !data.length || (mode === "prompt" && !userPrompt.trim()) || (mode === "manual" && selectedTools.length === 0)) ? "not-allowed" : "pointer",
+              fontWeight: "bold",
+              fontSize: "1em"
+            }}
+          >
+            {loading ? "⏳ Analyzing..." : "🚀 Run Analysis"}
+          </button>
+        </div>
+        {data.length > 0 && (
+          <div style={{ marginTop: "1rem", padding: "0.5rem", backgroundColor: "#e8f5e9", borderRadius: "4px" }}>
+            ✅ <strong>{data.length}</strong> rows loaded
+          </div>
+        )}
+      </div>
+      
+      {loading && (
+        <div style={{
+          padding: "2rem",
+          textAlign: "center",
+          backgroundColor: "#fff3e0",
+          borderRadius: "8px",
+          marginBottom: "2rem"
+        }}>
+          <h3>⏳ Processing your request...</h3>
+          <p>The AI is analyzing your data and executing the pipeline. This may take a few moments.</p>
+        </div>
+      )}
       {data.length > 0 && (
         <div style={{ marginTop: "2rem" }}>
           <h3>CSV Preview</h3>
@@ -426,8 +742,92 @@ function App() {
         <div style={{ marginTop: "2rem" }}>
           <h3>Analysis Result</h3>
           
-          {/* V2 Pipeline Metadata */}
-          {result.tool_meta && (
+          {/* User Feedback / Clarification Required - Show FIRST */}
+          {result.result?.user_feedback && (
+            <div style={{ 
+              marginBottom: "2rem",
+              padding: "1.5rem", 
+              backgroundColor: result.result.user_feedback.type === "clarification" ? "#e3f2fd" : "#fff3e0", 
+              borderRadius: "8px",
+              border: `3px solid ${result.result.user_feedback.type === "clarification" ? "#2196f3" : "#ff9800"}`
+            }}>
+              <h4 style={{ marginTop: 0 }}>
+                {result.result.user_feedback.type === "clarification" ? "🤔 Please Clarify Your Request" : "⚠️ User Feedback Required"}
+              </h4>
+              <p style={{ fontSize: "1.1em", marginBottom: "1.5rem" }}>
+                {result.result.user_feedback.message}
+              </p>
+              
+              {result.result.user_feedback.type === "clarification" && result.result.user_feedback.options && (
+                <div>
+                  <strong style={{ display: "block", marginBottom: "1rem" }}>Please select what you want to do:</strong>
+                  <div style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
+                    gap: "1rem"
+                  }}>
+                    {result.result.user_feedback.options.map((opt, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => handleClarificationSelection(opt.id)}
+                        style={{
+                          padding: "1rem",
+                          backgroundColor: "white",
+                          border: "2px solid #2196f3",
+                          borderRadius: "6px",
+                          cursor: "pointer",
+                          textAlign: "left",
+                          transition: "all 0.2s",
+                          fontFamily: "inherit"
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.backgroundColor = "#e3f2fd";
+                          e.currentTarget.style.transform = "translateY(-2px)";
+                          e.currentTarget.style.boxShadow = "0 4px 8px rgba(0,0,0,0.1)";
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.backgroundColor = "white";
+                          e.currentTarget.style.transform = "translateY(0)";
+                          e.currentTarget.style.boxShadow = "none";
+                        }}
+                      >
+                        <div style={{ fontWeight: "bold", fontSize: "1.1em", marginBottom: "0.5rem", color: "#2196f3" }}>
+                          {opt.label}
+                        </div>
+                        <div style={{ fontSize: "0.9em", color: "#666" }}>
+                          {opt.description}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                  <div style={{ 
+                    marginTop: "1.5rem", 
+                    padding: "1rem", 
+                    backgroundColor: "#f5f5f5", 
+                    borderRadius: "4px",
+                    fontSize: "0.9em",
+                    color: "#666"
+                  }}>
+                    💡 <strong>Tip:</strong> You can also use the "Manual Tool Selection" mode to test specific tools directly without writing prompts.
+                  </div>
+                </div>
+              )}
+              
+              {result.result.user_feedback.type !== "clarification" && result.result.user_feedback.options && (
+                <div>
+                  <strong>Options:</strong>
+                  <ul>
+                    {result.result.user_feedback.options.map((opt, idx) => (
+                      <li key={idx}>{opt.message || opt.label || opt.option}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+          
+          {/* V2 Pipeline Metadata - Only show if NOT clarification required */}
+          {result.tool_meta && result.status !== "clarification_required" && result.result?.status !== "clarification_required" && (
             <div style={{ marginBottom: "1rem", padding: "1rem", backgroundColor: "#f0f0f0", borderRadius: "4px" }}>
               <h4>Pipeline Info</h4>
               <p><strong>Status:</strong> <span style={{ 
@@ -455,7 +855,7 @@ function App() {
           )}
           
           {/* Tool Invocation Logs */}
-          {result.result?.results && result.result.results.length > 0 && (
+          {result.result?.results && result.result.results.length > 0 && result.result?.status !== "clarification_required" && (
             <div style={{ marginBottom: "1rem", padding: "1rem", backgroundColor: "#e3f2fd", borderRadius: "4px" }}>
               <h4>🔧 Tool Invocation Log</h4>
               <div style={{ fontFamily: "monospace", fontSize: "0.9em" }}>
@@ -545,21 +945,26 @@ function App() {
             </div>
           )}
           
-          {/* Chart */}
-          <canvas id="anomalyChart" width="800" height="300" style={{ marginBottom: "2rem" }}></canvas>
-          
-          {/* Cluster Chart */}
-          {result.result?.results && result.result.results.some(r => r.output?.clusters) && (
-            <canvas id="clusterChart" width="800" height="400" style={{ marginBottom: "2rem" }}></canvas>
-          )}
-          
-          {/* Forecast Chart */}
-          {result.result?.results && result.result.results.some(r => r.output?.forecast) && (
-            <canvas id="forecastChart" width="800" height="400" style={{ marginBottom: "2rem" }}></canvas>
+          {/* Visualizations - Only show if NOT clarification required */}
+          {result.result?.status !== "clarification_required" && (
+            <>
+              {/* Chart */}
+              <canvas id="anomalyChart" width="800" height="300" style={{ marginBottom: "2rem" }}></canvas>
+              
+              {/* Cluster Chart */}
+              {result.result?.results && result.result.results.some(r => r.output?.clusters) && (
+                <canvas id="clusterChart" width="800" height="400" style={{ marginBottom: "2rem" }}></canvas>
+              )}
+              
+              {/* Forecast Chart */}
+              {result.result?.results && result.result.results.some(r => r.output?.forecast) && (
+                <canvas id="forecastChart" width="800" height="400" style={{ marginBottom: "2rem" }}></canvas>
+              )}
+            </>
           )}
           
           {/* Clustering Visualization */}
-          {result.result?.results && result.result.results.some(r => r.output?.clusters) && (
+          {result.result?.results && result.result.results.some(r => r.output?.clusters) && result.result?.status !== "clarification_required" && (
             <div style={{ marginBottom: "2rem" }}>
               <h4>🔵 Clustering Results</h4>
               {result.result.results.filter(r => r.output?.clusters).map((toolResult, idx) => (
@@ -586,7 +991,7 @@ function App() {
           )}
           
           {/* Detailed Tool Results (Collapsible) */}
-          {result.result?.results && result.result.results.length > 0 && (
+          {result.result?.results && result.result.results.length > 0 && result.result?.status !== "clarification_required" && (
             <details style={{ marginBottom: "1rem" }}>
               <summary style={{ 
                 cursor: "pointer", 
@@ -624,35 +1029,11 @@ function App() {
           )}
           
           {/* Summary */}
-          {result.result?.summary && (
+          {result.result?.summary && result.result?.status !== "clarification_required" && (
             <>
               <h4>Summary</h4>
               <pre>{JSON.stringify(result.result.summary, null, 2)}</pre>
             </>
-          )}
-          
-          {/* User Feedback Required */}
-          {result.result?.user_feedback && (
-            <div style={{ 
-              marginTop: "1rem", 
-              padding: "1rem", 
-              backgroundColor: "#fff3e0", 
-              borderRadius: "4px",
-              border: "2px solid #ff9800"
-            }}>
-              <h4>⚠️ User Feedback Required</h4>
-              <p>{result.result.user_feedback.message}</p>
-              {result.result.user_feedback.options && (
-                <div>
-                  <strong>Options:</strong>
-                  <ul>
-                    {result.result.user_feedback.options.map((opt, idx) => (
-                      <li key={idx}>{opt.message || opt.option}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
           )}
         </div>
       )}
